@@ -361,7 +361,7 @@ function InviteFriends({ game, setGame }: { game: Game; setGame(g: Game): void }
       {candidates.length > 0 && (
         <div className="invite-checks">
           {candidates.map((f) => (
-            <label key={f.id}>
+            <label key={f.id} className="field-inline settings-check">
               <input
                 type="checkbox"
                 checked={selected.has(f.id)}
@@ -372,7 +372,7 @@ function InviteFriends({ game, setGame }: { game: Game; setGame(g: Game): void }
                   setSelected(next);
                 }}
               />
-              {f.displayName}
+              <span>{f.displayName}</span>
             </label>
           ))}
         </div>

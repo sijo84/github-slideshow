@@ -358,7 +358,7 @@ export function SettingsForm(props: {
                   <th id={id('col-antekind')} scope="col">Ante kind</th>
                   <th id={id('col-min')} scope="col">Minutes</th>
                   <th scope="col">
-                    <span className="visually-hidden">Actions</span>
+                    <span className="sr-only">Actions</span>
                   </th>
                 </tr>
               </thead>
@@ -456,15 +456,7 @@ export function SettingsForm(props: {
                 <label htmlFor={id('preset-minutes')}>Minutes per level</label>
                 <NumberInput id={id('preset-minutes')} value={presetMinutes} min={1} onChange={setPresetMinutes} />
               </div>
-              <div className="field settings-check">
-                <input
-                  id={id('preset-ante')}
-                  type="checkbox"
-                  checked={presetAnte}
-                  onChange={(e) => setPresetAnte(e.target.checked)}
-                />
-                <label htmlFor={id('preset-ante')}>Big blind ante from level 4</label>
-              </div>
+              <Checkbox label="Big blind ante from level 4" checked={presetAnte} onChange={(v) => setPresetAnte(v)} />
             </div>
             <button
               type="button"
@@ -512,15 +504,7 @@ export function SettingsForm(props: {
             </>
           )}
         </div>
-        <div className="field settings-check">
-          <input
-            id={id('rebuys')}
-            type="checkbox"
-            checked={s.rebuys.allowed}
-            onChange={(e) => set('rebuys', { ...s.rebuys, allowed: e.target.checked })}
-          />
-          <label htmlFor={id('rebuys')}>Allow rebuys</label>
-        </div>
+        <Checkbox label="Allow rebuys" checked={s.rebuys.allowed} onChange={(v) => set('rebuys', { ...s.rebuys, allowed: v })} />
         {s.kind === 'tournament' &&
           s.rebuys.allowed &&
           field('rebuy-until', 'Rebuys until level', 'rebuys.untilLevel', s.rebuys.untilLevel, (n) =>
@@ -601,25 +585,9 @@ export function SettingsForm(props: {
 
       <fieldset className="settings-group">
         <legend>Table</legend>
-        <div className="field settings-check">
-          <input
-            id={id('approval')}
-            type="checkbox"
-            checked={s.seatApproval}
-            onChange={(e) => set('seatApproval', e.target.checked)}
-          />
-          <label htmlFor={id('approval')}>Host approves each seat</label>
-        </div>
+        <Checkbox label="Host approves each seat" checked={s.seatApproval} onChange={(v) => set('seatApproval', v)} />
         {s.kind === 'cash' && (
-          <div className="field settings-check">
-            <input
-              id={id('autostart')}
-              type="checkbox"
-              checked={s.autoStart}
-              onChange={(e) => set('autoStart', e.target.checked)}
-            />
-            <label htmlFor={id('autostart')}>Deal hands automatically when two players are seated</label>
-          </div>
+          <Checkbox label="Deal hands automatically when two players are seated" checked={s.autoStart} onChange={(v) => set('autoStart', v)} />
         )}
       </fieldset>
 
@@ -656,5 +624,15 @@ function AnteKindSelect(props: {
       <option value="every">Every player</option>
       <option value="bigBlind">Big blind ante</option>
     </select>
+  );
+}
+
+/** A left-aligned checkbox row; the whole label (box and text) is the click target. */
+function Checkbox(props: { label: string; checked: boolean; onChange(v: boolean): void }): JSX.Element {
+  return (
+    <label className="field-inline settings-check">
+      <input type="checkbox" checked={props.checked} onChange={(e) => props.onChange(e.target.checked)} />
+      <span>{props.label}</span>
+    </label>
   );
 }
