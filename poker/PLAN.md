@@ -553,8 +553,8 @@ Parallel: D1, D2, D3.
 | # | Delivers (works on its own) | Check (the lead runs it; all must pass) |
 |---|---|---|
 | 0 | Empty but working workspace; slideshow unaffected | `cd poker && npm ci && npm run lint && npm run typecheck && npx vitest run --passWithNoTests && npm run e2e`, plus the S0.2 proof from the repo root |
-| 1 | Cards, fair shuffle, evaluator, pots, blinds, settlement, protocol schemas | `npm run lint && npm run typecheck && npx vitest run packages` |
-| 2 | Complete headless poker engine with equity, stats, collusion | `npm run lint && npm run typecheck && npx vitest run packages` (includes the 2,000-hand simulation) |
+| 1 | Cards, fair shuffle, evaluator, pots, blinds, settlement, protocol schemas | `npm run lint && npm run typecheck && npx vitest run --project engine --project protocol` (amended at checkpoint 1: the bare filter `packages` matches no test file in Vitest 5) |
+| 2 | Complete headless poker engine with equity, stats, collusion | `npm run lint && npm run typecheck && npx vitest run --project engine --project protocol` (includes the 2,000-hand simulation) |
 | 3 | Server boots, migrates, health, sessions, CSRF | `npx vitest run apps/server && npm run db:migrate -w @poker/server && (npm run dev -w @poker/server & sleep 5; curl -sf localhost:3001/api/health; kill %1)` |
 | 4 | REST: accounts, avatars, friends, notes, wallet, notifications | `npm run lint && npm run typecheck && npx vitest run apps/server` |
 | 5 | Bots can play full hands over sockets with timers, fairness and redaction | `npx vitest run apps/server` (includes `integration.table.test.ts`) |
@@ -638,7 +638,7 @@ Each checkpoint: run its check → fix until green → check the real files (not
 | AC14 | `history.test.ts` redaction; `replay.test.ts`; `e2e/history.spec.ts` | In `useReplay.ts`, step back without rebuilding (`index--` only) → state mismatch |
 | AC15 | `hostControls.test.ts`; `tableManager.test.ts` "applies next hand"; `hostPanel.test.tsx` | In `tableManager.ts`, apply `pendingSettings` immediately instead of at `startHand` |
 | AC16 | `wallet.test.ts` concurrency + zero-sum + non-negative | In `ledger.ts`, remove `for update` from the balance select |
-| AC17 | `settlement.test.ts` (a)–(f); `games.test.ts` settlement nets (F2); `settlement.page.test.tsx`; `e2e/tournament.spec.ts` | In `settlement.ts`, pay `Math.min(debt, credit) - 1` instead of `Math.min(debt, credit)` → the balance property fails |
+| AC17 | `settlement.test.ts` (a)–(f); `games.test.ts` settlement nets (F2); `settlement.page.test.tsx`; `e2e/tournament.spec.ts` | In `settlement.ts`, record the transfer as `chips - 1` (`transfers.push({ ..., chips: chips - 1 })`) → the balance property fails. (Amended at checkpoint 1: the original mutation, paying `Math.min(debt, credit) - 1`, makes `settle` loop forever, so the test hangs instead of failing.) |
 | AC18 | `tournament.test.ts` places/prizes/levels; `e2e/tournament.spec.ts` | In `tournament.ts`, place ties by seat number instead of starting stack |
 
 Evaluator correctness (supports AC6): mutation `evaluator.ts` treat the wheel as not a straight → the exhaustive count test fails (straight 10,200 → 9,180).
@@ -841,4 +841,30 @@ Review run 2026-11-24 by a fresh sub-agent (checked versions with `npm view` and
   - Extra pins: @eslint/js 10.0.1, globals 17.14.0, npm-run-all2 9.1.0, @types/luxon 3.7.6, @testing-library/react 16.3.3, @testing-library/user-event 14.6.13, @testing-library/jest-dom 8.0.0.
 - Mutation checks: none. This checkpoint has no acceptance-criterion tests.
 
-Next: checkpoint 1. Start a fresh session on Fable. This session's context is past half.
+### Checkpoint 1: Engine primitives + protocol, 2026-11-24 (passed)
+- Lead: Fable 5.2 (the session started on Opus 5.5, stopped before any checkpoint work, and the user switched it to Fable). All 7 sub-agents ran on Opus.
+- Setup: the Poker App setup script had not run, because the session opened on a branch without `poker/`. The lead started Postgres, re-created the role and the three databases, and ran `npm ci` by hand.
+- Check, run by the lead: `npm run lint` exit 0, `npm run typecheck` exit 0, `npx vitest run --project engine --project protocol`: 7 files, 157 tests passed (cards 5, rng 11, evaluator 41, pots 14, blinds 40, settlement 9, protocol 37). The exhaustive 2,598,960-hand evaluator count ran in full.
+- Plan amendments:
+  - The checkpoint 1 and 2 check command `npx vitest run packages` finds no test files in Vitest 5. It is now `npx vitest run --project engine --project protocol`.
+  - The AC17 mutation was changed (see Proof), because the original one loops forever.
+- The lead read every source file against I-1/I-2/I-3 and the review findings.
+- Mutation checks (each applied with Edit, seen to fail, reversed with the reverse Edit; sha256 of the four files matched afterwards):
+  - AC6 pots, drop folded chips: 4 pots tests failed.
+  - AC7 `commit` hashes `serverSeed + 'x'`: "(f) commit known answer" failed.
+  - AC7 `uniformInt` without the rejection loop: "(g) rejects values >= limit" failed.
+  - AC7 `cardCommitments` hashes `card + 1`: both "(h)" tests failed.
+  - AC17 original mutation: the test run hung and was killed after 60 s. Amended mutation: 4 settlement tests failed, including the balance property.
+  - Evaluator, wheel not a straight: the exhaustive count failed, plus 2 others.
+  - AC6 `hand.ts` min-raise mutation belongs to checkpoint 2.
+- E2 frozen vectors: `deckFromSeeds('00'×32, ['11'×16], 1)` starts `[31, 51, 38, 6, 11]`; cross-checked by the sub-agent against `node:crypto`.
+- Deviations accepted:
+  - cards: `parseCard` ignores case; `formatCard` throws outside 0..51; `parseCards('')` returns `[]`.
+  - rng: `uniformInt` throws `RangeError` on a bad `n`; `verifyDeck` also checks the deck length.
+  - evaluator: throws on duplicate or out-of-range cards; rank 0 is named "Deuce"; an ace-high straight flush is named "Royal flush".
+  - pots: also exports `mergeAdjacentPots` and `PotContribution`; all-folded input gives one pot with `eligible: []`; `splitPot` returns `[]` for no winners.
+  - blinds: `forcedBets` omits zero-amount entries; `levelAt` returns `msLeft: 0` after the last level and throws on an empty schedule.
+  - settlement: `formatPlayMoney` throws on a non-safe-integer; with no transfers `settlementText` starts "Everyone is even."
+  - protocol: `PartialGameSettingsSchema` carries no defaults, so `updateSettings` never resets omitted fields. Also exported: `ClientEventSchemas`, `ServerEventSchemas`, `GameSettingsInput`, `MIN_TURN_SECONDS`, and payload types `HostCommandMessage`, `TableStatusMessage`, `HandEventMessage`, `ErrorMessage`, `Notify`. `SeatView.avatarUrl` is `string | null`. Client payloads and `GameSettings` reject unknown keys. Compile-time checks tie the zod schemas to the engine types.
+
+Next: checkpoint 2.
