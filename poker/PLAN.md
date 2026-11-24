@@ -990,4 +990,26 @@ Review run 2026-11-24 by a fresh sub-agent (checked versions with `npm view` and
   - S2: 5xx errors always answer `{ error: 'Internal error' }`. Zod errors are recognised by shape. `Config.trustProxy` is `boolean | number | string`. `buildApp` takes `rateLimitMax` (default 300). `/avatars/*` always carries the strict CSP.
 - Open point for checkpoint 7: the global limit of 300 requests a minute per IP may be too low for e2e runs from one machine; if so, add an env override to `config.ts`.
 
-Next: checkpoint 4.
+### Checkpoint 4: Accounts, social, wallet, 2026-11-24 (passed)
+- Lead: Fable 5.2. All 6 sub-agents ran on Opus.
+- Check, run by the lead: `npm run lint` exit 0, `npm run typecheck` exit 0, `npx vitest run --project server`: 8 files, 113 tests passed (migrate 5, app 20, auth 15, profile 15, friends 15, notes 14, wallet 17, notifications 12).
+- Live check by the lead (real server, `REGISTRATION=open`, curl): registering Ana and Ben gave each a session; Ana's `GET /api/wallet` showed balance 10000 with one `signup` entry (S3 and S7 together, unmocked); Ana's friend request by email in upper case returned `pending`; Ben's `GET /api/notifications` showed the `friendRequest` row (S5 and S10 together) and his `GET /api/friends` listed Ana under `incoming`; a POST with `Origin: http://evil.example` got 403.
+- Sent back and fixed:
+  - S1's `migrate.test.ts` hard-coded the table and migration lists and failed once `003_invites.sql` existed. It now reads the migration files from the folder.
+  - The lead's S3 brief wrongly put the auth rate limit on all four `/auth/*` routes. It now applies only to register and login, so `GET /auth/me` on every page load is not throttled; a test covers it.
+- The lead read `wallet/ledger.ts` and `routes/notes.ts` in full and the header of `routes/friends.ts`.
+- Mutation checks:
+  - AC11 `routes/friends.ts`, accept sets `'pending'`: the lifecycle test failed.
+  - AC13 `routes/notes.ts`, `(author = $1 or true)` in the single-note read: 5 tests failed, including "B cannot read A's note on C".
+  - AC16 `wallet/ledger.ts`, `for update` removed from the row-lock query: 3 tests failed (parallel buy-ins, the barrier race at −600, the non-negative invariant).
+  - The lead applied and reversed these with `sed`. The reverse substitution for friends.ts was too broad and changed four other lines; the lead found this through the sha256 comparison, restored them, and all three files then matched their pre-mutation hashes and the 113 tests passed again. From now on mutations are applied and reversed with the Edit tool, as step 7 says.
+- Plan additions: `Config` gained `authRateLimitMax` (`AUTH_RATE_LIMIT_MAX`, default 10) and `rateLimitMax` (`RATE_LIMIT_MAX`, default 300; S12 wires it into `main.ts`). `storage/avatars.ts` exports `avatarUrlFor`, used by every route that returns a user.
+- Deviations accepted:
+  - auth: also `GET /api/invites`; login does not check the email format; the signup grant runs after the user transaction commits.
+  - profile: also `DELETE /api/profile/avatar`; a non-multipart upload gets 400.
+  - friends: an advisory lock per user pair makes simultaneous requests safe; `areFriends(db, a, b)` is exported for later routes.
+  - notes: `DELETE` answers `{ ok: true }` for an unknown subject.
+  - wallet: entry reasons are `signup`, `host grant`, `buy-in`, `cash-out`; `InsufficientFundsError` maps to 409 "Not enough chips".
+  - notifications: also `POST /api/notifications/read-all`.
+
+Next: checkpoint 5.

@@ -1,8 +1,15 @@
+import { readdirSync } from 'node:fs';
+import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { migrate } from '../src/db/migrate.js';
 import { fakeClock, testDb } from '../src/test/helpers.js';
 
-const TABLES = [
+const MIGRATIONS = readdirSync(path.resolve(import.meta.dirname, '../migrations'))
+  .filter((f) => f.endsWith('.sql'))
+  .sort();
+
+// The I-4 tables; later migrations may add more.
+const I4_TABLES = [
   'users', 'sessions', 'friendships', 'notes', 'games', 'game_invites', 'ledger_accounts', 'ledger_entries',
   'hands', 'hand_players', 'chat_messages', 'notifications', 'integrity_flags', 'tournament_results', 'schema_migrations',
 ];
@@ -23,13 +30,13 @@ describe('migrate', () => {
     const { pool, schema } = await freshDb();
     expect(await migrate(pool)).toEqual([]);
     const applied = await pool.query<{ name: string }>('select name from schema_migrations');
-    expect(applied.rows.map((r) => r.name)).toContain('001_init.sql');
+    expect(applied.rows.map((r) => r.name).sort()).toEqual(MIGRATIONS);
     const res = await pool.query<{ table_name: string }>(
       'select table_name from information_schema.tables where table_schema = $1',
       [schema],
     );
     const names = res.rows.map((r) => r.table_name);
-    for (const t of TABLES) expect(names).toContain(t);
+    expect(names).toEqual(expect.arrayContaining(I4_TABLES));
   });
 
   it('allows only one bank account', async () => {
@@ -57,11 +64,17 @@ describe('migrate', () => {
 
   it('handles two concurrent migrators on a fresh schema', async () => {
     const { pool, schema } = await freshDb();
-    await pool.query('drop table ' + TABLES.join(', ') + ' cascade');
+    // Reset the schema generically: drop every table that exists in it.
+    const existing = await pool.query<{ table_name: string }>(
+      `select table_name from information_schema.tables where table_schema = $1 and table_type = 'BASE TABLE'`,
+      [schema],
+    );
+    const list = existing.rows.map((r) => `"${r.table_name.replace(/"/g, '""')}"`).join(', ');
+    if (list) await pool.query(`drop table ${list} cascade`);
     const tables = await pool.query('select 1 from information_schema.tables where table_schema = $1', [schema]);
     expect(tables.rowCount).toBe(0);
     const [a, b] = await Promise.all([migrate(pool), migrate(pool)]);
-    expect([...a, ...b].sort()).toEqual(['001_init.sql']);
+    expect([...a, ...b].sort()).toEqual(MIGRATIONS);
     expect(await migrate(pool)).toEqual([]);
   });
 });

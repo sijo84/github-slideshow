@@ -13,6 +13,10 @@ export interface Config {
   trustProxy: TrustProxy;
   registration: Registration;
   production: boolean;
+  /** Requests per minute per IP on each /api/auth/* route. */
+  authRateLimitMax: number;
+  /** Requests per minute per IP for the global rate limit. */
+  rateLimitMax: number;
 }
 
 /** The server package root (`apps/server`); relative paths in config resolve against it. */
@@ -42,6 +46,15 @@ function parseTrustProxy(value: string | undefined): TrustProxy {
   return v;
 }
 
+function parsePositiveInt(name: string, value: string | undefined, fallback: number): number {
+  if (value === undefined || value === '') return fallback;
+  const n = Number(value);
+  if (!/^\d+$/.test(value.trim()) || !Number.isSafeInteger(n) || n <= 0) {
+    throw new Error(`Invalid ${name}: ${value} (expected a positive integer)`);
+  }
+  return n;
+}
+
 function parseRegistration(value: string | undefined): Registration {
   if (value === undefined || value === '') return 'invite';
   if (value === 'open' || value === 'invite') return value;
@@ -59,5 +72,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     trustProxy: parseTrustProxy(env.TRUST_PROXY),
     registration: parseRegistration(env.REGISTRATION),
     production: env.NODE_ENV === 'production',
+    authRateLimitMax: parsePositiveInt('AUTH_RATE_LIMIT_MAX', env.AUTH_RATE_LIMIT_MAX, 10),
+    rateLimitMax: parsePositiveInt('RATE_LIMIT_MAX', env.RATE_LIMIT_MAX, 300),
   };
 }
