@@ -1053,4 +1053,25 @@ Review run 2026-11-24 by a fresh sub-agent (checked versions with `npm view` and
   - wallet: entry reasons are `signup`, `host grant`, `buy-in`, `cash-out`; `InsufficientFundsError` maps to 409 "Not enough chips".
   - notifications: also `POST /api/notifications/read-all`.
 
-Next: checkpoint 5.
+### Checkpoint 5: Real-time table, 2026-11-24 (passed)
+- Lead: Fable 5.2. All 3 sub-agents ran on Opus. Before the build the lead wrote section I-9 into this plan (`8e132f8`).
+- Interruption: the S13 sub-agent stopped on the account's usage limit and the session's worker restarted. Files on disk were intact. The lead restarted Postgres, pushed a work-in-progress commit (`007c615`) and resumed S13 after the limit reset.
+- Check, run by the lead: `npm run lint` exit 0, `npm run typecheck` exit 0, `npx vitest run` (everything): 23 files, 401 tests passed (tableManager 17, socket 28, integration 3, plus the earlier ones). The real server booted and answered `/api/health` and the Socket.IO handshake.
+- Sent back and fixed:
+  - S8, after the lead's decisions on its questions: a settings change applies at once when no hand is in progress and waits for the next hand otherwise; `TableView.deadline` and `toAct` are visible to every viewer (only `legal` is private).
+  - S13: the "own seed used" check failed under load. Two causes, both in the test: a 50 ms seed window (now 2000 ms; the server proceeds as soon as all seeds are in, measured 1–11 ms) and the bot linking a sit-time seed to the wrong hand.
+  - E6 (checkpoint 1): the settlement property test failed on a random seed because a derived net was `-0`. Test-only fix plus a new test that `settle` treats `-0` as even.
+- The lead read `redact`, the hand-event emission, the card-proof code and the turn-timer code in `tableManager.ts`, and S12's handler in `socket.ts`.
+- Mutation checks (applied and reversed with the Edit tool; both files matched their sha256 afterwards and the 401 tests passed again):
+  - AC8 `redact` returns the event unchanged: the `redact` unit test, the spectator test and the 30-hand bot test failed.
+  - AC8 `socket.ts` skips the schema parse: all 12 invalid-payload tests failed.
+  - AC10 time bank skipped: "switches to the time bank, then checks or folds on timeout" failed.
+  - AC12 chat bucket capacity 500: the chat rate-limit test failed.
+  - AC15 settings applied immediately mid-hand: "applies a mid-hand settings change from the next hand" failed.
+- Deviations accepted:
+  - S8: extra `whenIdle(gameId)` and an optional `logger` dep. The manager acts on the `effects` of `applyHostCommand`. A kicked or leaving player is auto-acted with `timeoutAction` (check if free, else fold). The sit-time client seed counts only for a hand whose commitment was already published. The seed wait covers connected, seated players with chips. After a restart, hand numbers continue from the last stored hand and a `running` game reopens as `waiting`. Cash results rank by net, ties share a place. The all-in `river` equity event is computed before the river card, so it is exact but not 0/1.
+  - S12: messages from one socket are handled in order through a per-socket queue. A rejected `table:join` acks `{ ok: false, error: <code> }`. `SocketTables` is the subset of manager methods the socket layer uses. Production static serving and SPA fallback were checked by the sub-agent with a real build.
+  - S13: `hostControls` is mocked in the integration test until S17 lands (**remove that mock in checkpoint 6**). Bots throttle themselves under the 10 events/s limit and sit again after busting.
+- Still open: `playwright.config.ts` must start the server with `REGISTRATION=open` and raised rate limits for e2e (checkpoint 7).
+
+Next: checkpoint 6.

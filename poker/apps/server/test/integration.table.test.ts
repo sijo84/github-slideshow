@@ -108,7 +108,7 @@ beforeAll(async () => {
   server = await createServer({
     pool,
     config,
-    tableOptions: { seedWaitMs: 50, runoutPacingMs: 0, handDelayMs: 0, autoStartMs: 0 },
+    tableOptions: { seedWaitMs: 2000, runoutPacingMs: 0, handDelayMs: 0, autoStartMs: 0 },
     scheduler: false,
   });
   await server.app.listen({ port: 0, host: '127.0.0.1' });
@@ -218,7 +218,9 @@ describe('integration: bots on the real table', () => {
           const mine = [h.clientSeed, ...h.sitSeeds].filter((x): x is string => x !== null);
           expect(
             mine.some((x) => ended.clientSeeds.includes(x)),
-            `${ctx}: own client seed used (${mine.join(',')} in ${ended.clientSeeds.join(',')})`,
+            `${ctx}: own client seed used (${mine.join(',')} in ${ended.clientSeeds.join(',')}; ` +
+              `commitments ${h.commitmentsReceived}, seed sent ${(h.seedEmittedAt ?? 0) - (h.startedAt ?? 0)} ms rel. handStarted; ` +
+              `seats ${JSON.stringify(started.seats)})`,
           ).toBe(true);
           const myPositions = pos.hole[kBySeat.get(mySeat)!] ?? [];
           expect(myHole, `${ctx}: hole = deck at dealPositions`).toEqual(myPositions.map((p) => deck[p]));

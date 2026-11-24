@@ -14,6 +14,11 @@ function balances(net: { playerId: string; chips: number }[], transfers: Transfe
   return result;
 }
 
+/** Negates without producing -0 (which Object.is-based assertions treat as distinct from 0). */
+function negate(x: number): number {
+  return x === 0 ? 0 : -x;
+}
+
 describe('settle', () => {
   it('(a) largest debtor pays the largest creditor first', () => {
     const { transfers } = settle([
@@ -38,12 +43,12 @@ describe('settle', () => {
     };
     for (let round = 0; round < 200; round++) {
       const values = Array.from({ length: 5 }, () => (rand() % 20001) - 10000);
-      values.push(-values.reduce((a, b) => a + b, 0));
+      values.push(negate(values.reduce((a, b) => a + b, 0)));
       const net = values.map((chips, i) => ({ playerId: `p${String(i)}`, chips }));
       const { transfers } = settle(net);
       expect(transfers.length).toBeLessThanOrEqual(5);
       const bal = balances(net, transfers);
-      for (const n of net) expect(bal.get(n.playerId)).toBe(n.chips);
+      for (const n of net) expect(bal.get(n.playerId) === n.chips).toBe(true);
     }
   });
 
@@ -52,7 +57,7 @@ describe('settle', () => {
       fc.property(
         fc.array(fc.integer({ min: -1_000_000, max: 1_000_000 }), { minLength: 1, maxLength: 8 }),
         (head) => {
-          const values = [...head, -head.reduce((a, b) => a + b, 0)];
+          const values = [...head, negate(head.reduce((a, b) => a + b, 0))];
           const net = values.map((chips, i) => ({ playerId: `p${String(i)}`, chips }));
           const { transfers } = settle(net);
           expect(transfers.length).toBeLessThanOrEqual(net.length - 1);
@@ -62,7 +67,7 @@ describe('settle', () => {
             expect(t.from).not.toBe(t.to);
           }
           const bal = balances(net, transfers);
-          for (const n of net) expect(bal.get(n.playerId)).toBe(n.chips);
+          for (const n of net) expect(bal.get(n.playerId) === n.chips).toBe(true);
           const zeroIds = new Set(net.filter((n) => n.chips === 0).map((n) => n.playerId));
           for (const t of transfers) {
             expect(zeroIds.has(t.from)).toBe(false);
@@ -90,6 +95,15 @@ describe('settle', () => {
   it('returns no transfers when everyone is even', () => {
     expect(settle([]).transfers).toEqual([]);
     expect(settle([{ playerId: 'A', chips: 0 }, { playerId: 'B', chips: 0 }]).transfers).toEqual([]);
+  });
+
+  it('treats a net of -0 as even (no transfer)', () => {
+    expect(settle([{ playerId: 'A', chips: -0 }, { playerId: 'B', chips: 0 }]).transfers).toEqual([]);
+    expect(settle([
+      { playerId: 'A', chips: 3 },
+      { playerId: 'B', chips: -3 },
+      { playerId: 'Z', chips: -0 },
+    ]).transfers).toEqual([{ from: 'B', to: 'A', chips: 3 }]);
   });
 
   it('(d) throws when nets do not sum to 0 or are not integers', () => {

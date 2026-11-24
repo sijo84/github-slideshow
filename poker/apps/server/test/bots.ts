@@ -44,7 +44,11 @@ export interface BotHand {
   commitmentBeforeStart: string | null;
   /** The client seed this bot sent for this hand number. */
   clientSeed: string | null;
-  /** Client seeds of `table:sit` messages this bot sent since its previous hand of this game started. */
+  /** Diagnostics: commitments received for this hand number, when the seed left, when handStarted arrived. */
+  commitmentsReceived: number;
+  seedEmittedAt: number | null;
+  startedAt: number | null;
+  /** Client seeds of `table:sit` messages sent since the bot's previous hand in which it was dealt. */
   sitSeeds: string[];
   started: HandStarted | null;
   ended: HandEnded | null;
@@ -202,6 +206,9 @@ export class Bot {
         handNumber,
         commitmentBeforeStart: null,
         clientSeed: null,
+        commitmentsReceived: 0,
+        seedEmittedAt: null,
+        startedAt: null,
         sitSeeds: [],
         started: null,
         ended: null,
@@ -238,7 +245,11 @@ export class Bot {
       if (h.started === null) h.commitmentBeforeStart = msg.commitment;
       const clientSeed = newClientSeed();
       h.clientSeed = clientSeed;
-      this.send((s) => s.emit('table:clientSeed', { gameId: msg.gameId, handNumber: msg.handNumber, clientSeed }), true);
+      h.commitmentsReceived++;
+      this.send((s) => {
+        h.seedEmittedAt = Date.now();
+        s.emit('table:clientSeed', { gameId: msg.gameId, handNumber: msg.handNumber, clientSeed });
+      }, true);
     } else if (name === 'hand:event') {
       const msg = payload as HandEventMessage;
       const ev = msg.event;
@@ -247,8 +258,13 @@ export class Bot {
         this.current.set(msg.gameId, ev.handNumber);
         const h = this.hand(msg.gameId, ev.handNumber);
         h.started = ev;
-        h.sitSeeds = this.pendingSitSeeds.get(msg.gameId) ?? [];
-        this.pendingSitSeeds.delete(msg.gameId);
+        h.startedAt = at;
+        // A sit seed counts for the first hand this bot is dealt into after the sit (the server may process
+        // the sit after a hand it watched has started).
+        if (ev.seats.some((x) => x.playerId === this.id)) {
+          h.sitSeeds = this.pendingSitSeeds.get(msg.gameId) ?? [];
+          this.pendingSitSeeds.delete(msg.gameId);
+        }
       }
       if (handNumber !== null) {
         const h = this.hand(msg.gameId, handNumber);
