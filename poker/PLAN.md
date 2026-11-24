@@ -574,6 +574,7 @@ Each checkpoint: run its check → fix until green → check the real files (not
 
 1. **Read this whole plan first**, including "Review findings" at the end, which override earlier text where they conflict.
 2. **You are the lead. You write no code.** Your jobs: dispatch sub-agents, run checks, review files, do mutation checks, commit, update this plan.
+   **Models (user decision, 2026-11-24):** the lead session runs on **Fable** (`claude-fable-5-2`; start the session with that model, e.g. `/model` before saying "Run the plan"). The lead makes the big decisions: interpreting the plan, resolving deviations and questions, deciding fixes when a check fails, and amending this plan. Every sub-agent is started with the Agent tool's `model: "opus"` and does all the building, testing and file editing. If the lead is not running on Fable, it says so to the user before starting checkpoint work.
 3. **Database (once, before checkpoint 0; see F23):**
    ```bash
    pg_ctlcluster 16 main start
@@ -584,7 +585,7 @@ Each checkpoint: run its check → fix until green → check the real files (not
    su postgres -c "psql -d poker_e2e -c 'create extension if not exists pgcrypto'"
    ```
    Tests use `DATABASE_URL=postgres://poker:poker@localhost:5432/poker_test` (set in `vitest.config.ts` env for the server project). If the container restarted, run `pg_ctlcluster 16 main start` again.
-4. **At the start of each checkpoint**, start one sub-agent per task in that checkpoint, **all in one message** so they run in parallel. Each brief contains, and only contains:
+4. **At the start of each checkpoint**, start one sub-agent per task in that checkpoint, **all in one message** so they run in parallel. Pass `model: "opus"` on every one. Each brief contains, and only contains:
    - the task id and its full text copied from this plan;
    - the exact list of files it may create or edit (and "edit no other file");
    - the interfaces it codes against (paste the relevant I-x blocks);
