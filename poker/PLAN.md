@@ -471,6 +471,68 @@ It calls `buildApp` (passing `config.rateLimitMax`), builds the `TableManager` w
 
 **Socket layer (S12).** `attachSockets(app, { tables, pool, config }): Server`. `io.use`: `userFromCookieHeader(pool, handshake.headers.cookie)` → reject with `Error('unauthorized')` if none; reject if the handshake `Origin` header is present and not `config.publicOrigin`. Each socket joins `user:<id>`. Handlers validate every payload with `ClientEventSchemas[event]`; invalid → `error { code: 'bad_request', message }` and nothing else happens. `table:join` → `tables.join` then join room `game:<id>`, ack `{ ok: true, view }` or `{ ok: false, error }`. `table:sit/leave/action/clientSeed/useTimeBank/rebuy` and `host:command` → the matching manager method. `chat:send`: sender must have joined that game; insert into `chat_messages`; emit `chat:message` to `game:<id>`. Token buckets per socket: 10 table events/s; chat 5 per 10 s (over the limit → `error { code: 'rate_limited' }`; the chat bucket's capacity must be a named constant `CHAT_BUCKET_CAPACITY = 5`). On disconnect: `tables.setConnected(gameId, userId, false)` for each joined game when it was the user's last socket in that game; on join `true`.
 
+#### I-10 Web foundation in detail (lead, checkpoint 7, written before the build; overrides the W1–W4 and W-E2E-1 task text and I-6 where they differ)
+
+**Extra file ownership in checkpoint 7** (no other task edits these):
+- W1 also owns `apps/web/src/App.tsx` (wrap every route except `/login` in `<Shell>`), `apps/web/src/main.tsx` (import `./ui/theme.css`), `apps/web/vite.config.ts` (add a `/avatars` proxy to `http://localhost:3001`; uploaded avatars are served there, outside `/api`), and `apps/web/test/setup.ts` if a shared jest-dom setup is wanted (then W1 tells the lead, who wires `setupFiles` into the root `vitest.config.ts`). W1 does **not** edit `package.json`: F9 already installed testing-library.
+- W-E2E-1 also owns `playwright.config.ts` and `e2e/reset-db.ts`.
+
+**REST shapes.** Every server route file starts with a comment block listing its routes, bodies, status codes and response types (`apps/server/src/routes/*.ts`). That block is the contract; web tasks read it and do not guess. Socket payload types come from `@poker/protocol`.
+
+**`src/api/client.ts` (W1):**
+```ts
+export class ApiError extends Error { readonly status: number; constructor(status: number, message: string) }
+/** path starts with '/api/'. JSON in and out. `body` is JSON-encoded unless it is a FormData. 204 → undefined.
+ *  A non-2xx answer throws ApiError(status, body.error ?? statusText). Always credentials: 'include' and an `x-device-id` header. */
+export function api<T>(path: string, init?: { method?: string; body?: unknown; signal?: AbortSignal }): Promise<T>;
+export function deviceId(): string; // uuid kept in localStorage under 'poker.deviceId'
+```
+**`src/api/useMe.ts` (W1):**
+```ts
+export interface Me { id: string; email: string; displayName: string; avatarUrl: string }
+/** One shared fetch of GET /api/auth/me for the whole app. On 401 it navigates to /login (except when already there). */
+export function useMe(): { me: Me | null; loading: boolean; refresh(): Promise<void>; setMe(me: Me | null): void };
+```
+**`src/api/socket.ts` (W1):** `getSocket(): Socket<ServerEvents, ClientEvents>` (one lazy singleton, `withCredentials`, path `/socket.io`), `joinTable(gameId): Promise<TableView>` (emits `table:join`, remembers the id and re-joins after every reconnect), `leaveTableRoom(gameId)`, `disconnectSocket()`.
+**`src/ui/Shell.tsx` (W1):** `export function Shell({ children }: { children: React.ReactNode })`. It shows the "Play money" label next to the nav (F13) and a Log out button.
+
+**`src/anim/easing.ts` / `src/anim/tween.ts` (W2):**
+```ts
+export type Vec3 = [number, number, number];
+export type TweenValue = number | Vec3;
+export type Ease = (t: number) => number;
+export const linear, easeInOutCubic, easeOutCubic, easeOutBack, easeOutQuart, easeInOutSine: Ease; // tween.ts re-exports them
+export interface TweenOptions<T extends TweenValue> {
+  id: string; from: T; to: T; durationMs: number; ease?: Ease /* default easeInOutCubic */; delayMs?: number;
+  onUpdate(value: T): void; onDone?(): void;
+}
+export interface TweenHandle { cancel(): void; readonly done: Promise<void> }
+/** One shared requestAnimationFrame loop, timestamp based. Starting a tween whose id is already running
+ *  replaces it and starts from that tween's current value (the new `from` is ignored), so nothing snaps. */
+export function tween<T extends TweenValue>(opts: TweenOptions<T>): TweenHandle;
+/** React state that eases to `target` whenever it changes (first render: equals target, no motion). */
+export function useTween<T extends TweenValue>(target: T, opts: { id: string; durationMs: number; ease?: Ease }): T;
+/** F5: like useTween for a position, and it also records the value it returns every frame under `obj:<id>` in the trace,
+ *  moving or not. The only way table objects and panels get a position. */
+export function useTweenedPosition(id: string, target: Vec3, opts?: { durationMs?: number; ease?: Ease }): Vec3;
+export function prefersReducedMotion(): boolean;
+export function activeTweenCount(): number;
+export function onTweenActivity(listener: (active: number) => void): () => void; // W5 switches the canvas frameloop with it
+export const trace: { enabled(): boolean; record(id: string, t: number, value: TweenValue): void; clear(): void };
+// window.__POKER_TRACE__ = true → samples { id, t, value, from?, to?, durationMs? } are pushed to window.__animTrace
+export function __setRafForTests(raf: (cb: (t: number) => void) => number, caf: (h: number) => void, now: () => number): void;
+```
+W2 may add to this surface and reports what it added; it does not remove or rename.
+
+**Page facts W3/W4 and the e2e spec agree on** (accessible names; the spec uses `getByRole`/`getByLabel` with exactly these):
+- `/login`: `<h1>Login</h1>` in login mode (the smoke test needs it), `<h1>Create account</h1>` in register mode; a button "Create an account" / "I already have an account" toggles. Fields labelled "Email", "Password", and in register mode "Display name" and "Invite code" (optional). Submit buttons "Log in" and "Create account". Errors show in an element with `role="alert"`. On success: navigate to `/`.
+- `/friends`: field "Friend's email", button "Send request"; incoming requests list each with buttons "Accept" and "Decline"; friends list with each friend's name linking to `/stats/:userId` and a "Remove" button.
+- `/` (Lobby): heading "Lobby", a "New game" button that opens a form with fields "Game name", "Starts at" (`datetime-local`), the `SettingsForm`, and a submit button "Schedule game". After creating, navigate to `/games/:id`. The list shows each game's name as a link to `/games/:id`.
+- `/games/:id`: heading = the game name. Host: an "Invite friends" section with a checkbox per friend (label = friend's name) and a button "Send invites". Invited user: RSVP buttons "Yes", "Maybe", "No" (the chosen one has `aria-pressed="true"`). A link "Add to calendar" with `href="/api/games/:id/calendar.ics"`. "Open table" link to `/table/:id` when the status is `open`, `running` or `paused`; the host also gets an "Open table now" button (`POST /api/games/:id/open`) while it is `scheduled`. On a 403 from `GET /api/games/:id` the page shows "You don't have access to this game" (F6).
+- Shell: a nav with links "Lobby", "Friends", "History", "Wallet", "Profile"; a button with accessible name "Notifications" (with the unread count in a badge) that opens a list of notification texts; clicking one marks it read and follows its link.
+
+**E2E server setup (W-E2E-1).** Playwright starts `webServer` before `globalSetup`, and the server migrates at boot, so a schema drop in `globalSetup` would pull the tables from under a running server. Instead: `e2e/reset-db.ts` (run with `tsx`) does `drop schema public cascade; create schema public;` on `poker_e2e` as the `poker` role (no pgcrypto, F12), and the server `webServer.command` becomes `npx tsx e2e/reset-db.ts && npm run dev -w @poker/server`. Its env adds `REGISTRATION=open`, `RATE_LIMIT_MAX=100000`, `AUTH_RATE_LIMIT_MAX=100000`. `e2e/global-setup.ts` stays a no-op.
+
 ---
 
 ## Tasks
