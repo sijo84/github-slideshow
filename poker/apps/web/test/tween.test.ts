@@ -222,7 +222,7 @@ describe('tween', () => {
   it('easeOutBack overshoot is passed through (≤ 10% of the distance)', () => {
     const values: number[] = [];
     tween({ id: 'b', from: 0, to: 100, durationMs: 300, ease: easeOutBack, onUpdate: (v) => values.push(v) });
-    frames(40, 4);
+    frames(80, 4);
     expect(Math.max(...values)).toBeGreaterThan(100);
     expect(Math.max(...values)).toBeLessThanOrEqual(110);
     expect(values.at(-1)).toBe(100);
@@ -316,6 +316,7 @@ describe('trace', () => {
       expect(x.to).toEqual([1, 2, 3]);
       expect(x.durationMs).toBe(100);
       expect(x.active).toBe(true);
+      expect(x.ease).toBe('easeInOutCubic');
     }
     expect(s.at(-1)!.value).toEqual([1, 2, 3]);
     expect(s.map((x) => x.t)).toEqual([...s.map((x) => x.t)].sort((a, b) => a - b));

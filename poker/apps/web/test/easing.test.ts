@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   EASE_OUT_BACK_OVERSHOOT,
+  EASE_PEAK_SLOPE,
   easeInOutCubic,
   easeInOutSine,
   easeOutBack,
@@ -47,14 +48,24 @@ describe('easing', () => {
 
   it('easeInOutCubic: near-zero slope at both ends, peak slope 1.5', () => {
     const h = 1e-4;
-    expect(easeInOutCubic(h) / h).toBeLessThan(1e-6);
-    expect((1 - easeInOutCubic(1 - h)) / h).toBeLessThan(1e-6);
+    // secant slope over the first/last 1e-4 of the curve is ~3h → 0
+    expect(easeInOutCubic(h) / h).toBeLessThan(1e-3);
+    expect((1 - easeInOutCubic(1 - h)) / h).toBeLessThan(1e-3);
     let maxSlope = 0;
     for (let i = 1; i <= N; i++) {
       maxSlope = Math.max(maxSlope, (easeInOutCubic(i / N) - easeInOutCubic((i - 1) / N)) * N);
     }
     expect(maxSlope).toBeLessThanOrEqual(1.5 + 1e-6);
     expect(maxSlope).toBeGreaterThan(1.49);
+  });
+
+  it('EASE_PEAK_SLOPE matches the sampled peak slope of each curve', () => {
+    for (const [name, f] of Object.entries(all)) {
+      let peak = 0;
+      for (let i = 1; i <= N; i++) peak = Math.max(peak, (f(i / N) - f((i - 1) / N)) * N);
+      expect(peak, name).toBeCloseTo(EASE_PEAK_SLOPE[name as keyof typeof EASE_PEAK_SLOPE], 2);
+      expect(f.name).toBe(name); // trace samples carry Function.name
+    }
   });
 
   it('easeOutBack: overshoots, but by at most 10%, and never dips below 0', () => {

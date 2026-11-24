@@ -1,6 +1,57 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, ApiError, deviceId } from '../src/api/client.js';
 
+// Fake socket.io-client: one controllable socket per io() call.
+const sio = vi.hoisted(() => {
+  type Ack = (err: Error | null, res: unknown) => void;
+  class FakeSocket {
+    connected = false;
+    handlers = new Map<string, ((...a: unknown[]) => void)[]>();
+    joins: { gameId: string; ack: Ack }[] = [];
+    io = { on: () => undefined, off: () => undefined };
+    on(ev: string, fn: (...a: unknown[]) => void) {
+      this.handlers.set(ev, [...(this.handlers.get(ev) ?? []), fn]);
+      return this;
+    }
+    fire(ev: string, ...args: unknown[]) {
+      for (const fn of this.handlers.get(ev) ?? []) fn(...args);
+    }
+    timeout() {
+      return {
+        emit: (ev: string, payload: { gameId: string }, ack: Ack) => {
+          if (ev === 'table:join') this.joins.push({ gameId: payload.gameId, ack });
+        },
+      };
+    }
+    connect() {
+      this.connected = true;
+      this.fire('connect');
+    }
+    drop() {
+      this.connected = false;
+      this.fire('disconnect', 'transport close');
+    }
+    removeAllListeners() {
+      this.handlers.clear();
+    }
+    disconnect = vi.fn(() => {
+      this.connected = false;
+    });
+  }
+  const created: FakeSocket[] = [];
+  return {
+    created,
+    io: vi.fn(() => {
+      const s = new FakeSocket();
+      created.push(s);
+      return s;
+    }),
+  };
+});
+vi.mock('socket.io-client', () => ({ io: sio.io }));
+
+const socketApi = await import('../src/api/socket.js');
+
 type FetchArgs = [input: RequestInfo | URL, init?: RequestInit];
 
 function jsonResponse(status: number, body: unknown, statusText = ''): Response {
@@ -124,5 +175,70 @@ describe('api()', () => {
     const ctrl = new AbortController();
     await api('/api/a', { signal: ctrl.signal });
     expect(lastInit().signal).toBe(ctrl.signal);
+  });
+});
+
+describe('socket client', () => {
+  afterEach(() => {
+    socketApi.disconnectSocket();
+    sio.created.length = 0;
+    sio.io.mockClear();
+  });
+
+  const view = (gameId: string) => ({ gameId, marker: Math.random() }) as unknown as import('@poker/protocol').TableView;
+
+  it('is a lazy singleton with credentials and the /socket.io path', () => {
+    expect(sio.io).not.toHaveBeenCalled();
+    const a = socketApi.getSocket();
+    const b = socketApi.getSocket();
+    expect(a).toBe(b);
+    expect(sio.io).toHaveBeenCalledTimes(1);
+    expect(sio.io).toHaveBeenCalledWith(expect.objectContaining({ path: '/socket.io', withCredentials: true }));
+  });
+
+  it('joins once connected, then re-joins remembered tables after a reconnect', async () => {
+    socketApi.getSocket();
+    const s = sio.created[0]!;
+    const p = socketApi.joinTable('g1');
+    expect(s.joins).toHaveLength(0);
+    s.connect();
+    expect(s.joins.map((j) => j.gameId)).toEqual(['g1']);
+    const v1 = view('g1');
+    s.joins[0]!.ack(null, { ok: true, view: v1 });
+    await expect(p).resolves.toBe(v1);
+
+    const rejoined: unknown[] = [];
+    const off = socketApi.onRejoin((v) => rejoined.push(v));
+    s.drop();
+    s.connect();
+    expect(s.joins.map((j) => j.gameId)).toEqual(['g1', 'g1']);
+    const v2 = view('g1');
+    s.joins[1]!.ack(null, { ok: true, view: v2 });
+    await vi.waitFor(() => expect(rejoined).toEqual([v2]));
+    off();
+
+    socketApi.leaveTableRoom('g1');
+    s.drop();
+    s.connect();
+    expect(s.joins).toHaveLength(2);
+  });
+
+  it('rejects with the server error and forgets the table', async () => {
+    socketApi.getSocket();
+    const s = sio.created[0]!;
+    s.connect();
+    const p = socketApi.joinTable('g9');
+    s.joins[0]!.ack(null, { ok: false, error: 'No such game' });
+    await expect(p).rejects.toThrow('No such game');
+    s.drop();
+    s.connect();
+    expect(s.joins).toHaveLength(1);
+  });
+
+  it('disconnectSocket closes the socket and the next getSocket makes a new one', () => {
+    const a = socketApi.getSocket();
+    socketApi.disconnectSocket();
+    expect(sio.created[0]!.disconnect).toHaveBeenCalled();
+    expect(socketApi.getSocket()).not.toBe(a);
   });
 });

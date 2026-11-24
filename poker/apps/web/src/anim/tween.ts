@@ -26,6 +26,7 @@ export {
   easeInOutSine,
   EASE_OUT_BACK_C,
   EASE_OUT_BACK_OVERSHOOT,
+  EASE_PEAK_SLOPE,
 } from './easing.js';
 export type { Ease, TweenValue, Vec3 } from './easing.js';
 
@@ -62,6 +63,8 @@ export interface TraceSample {
   active?: boolean;
   /** For `obj:` samples: the id of the tween that drove the object this frame. */
   tween?: string;
+  /** Name of the ease function (`Function.name`, e.g. 'easeOutCubic'; see EASE_PEAK_SLOPE). */
+  ease?: string;
 }
 
 export interface TraceMeta {
@@ -70,6 +73,7 @@ export interface TraceMeta {
   durationMs?: number;
   active?: boolean;
   tween?: string;
+  ease?: string;
 }
 
 /** Maximum number of samples kept in `window.__animTrace`. */
@@ -110,6 +114,7 @@ export const trace = {
       if (meta.durationMs !== undefined) sample.durationMs = meta.durationMs;
       if (meta.active !== undefined) sample.active = meta.active;
       if (meta.tween !== undefined) sample.tween = meta.tween;
+      if (meta.ease !== undefined) sample.ease = meta.ease;
     }
     buf.push(sample);
   },
@@ -195,6 +200,7 @@ interface FrameInfo {
   from: TweenValue;
   to: TweenValue;
   durationMs: number;
+  ease: string;
 }
 
 interface Tracked {
@@ -269,8 +275,9 @@ function step(e: Entry, t: number, tracing: boolean): void {
   const value = fromArr(e.current, e.scalar);
   const from = fromArr(e.from, e.scalar);
   const to = fromArr(e.to, e.scalar);
-  frameInfo.set(e.id, { from, to, durationMs: e.duration });
-  if (tracing) trace.record(e.id, t, value, { from, to, durationMs: e.duration, active: true });
+  const info: FrameInfo = { from, to, durationMs: e.duration, ease: e.ease.name };
+  frameInfo.set(e.id, info);
+  if (tracing) trace.record(e.id, t, value, { ...info, active: true });
   try {
     e.emit(value);
   } catch (err) {

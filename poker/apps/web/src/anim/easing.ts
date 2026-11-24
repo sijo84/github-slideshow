@@ -18,12 +18,27 @@ function unit(t: number): number {
 
 export const linear: Ease = (t) => unit(t);
 
-/** Cubic in-out: zero slope at both ends, peak slope 1.5 at t = 0.5. */
+/**
+ * Cubic in-out, as the Hermite cubic 3t² − 2t³ ("smoothstep"): zero slope at both ends and a peak slope of
+ * exactly 1.5 at t = 0.5, i.e. peak velocity 1.5× the average, which is what the plan's per-frame bounds
+ * (2× in unit tests, 2.5× in the e2e trace check) are built on. Penner's piecewise 4t³ curve peaks at 3×
+ * and would break those bounds, so it is deliberately not used here.
+ */
 export const easeInOutCubic: Ease = (raw) => {
   const t = unit(raw);
   if (t === 0 || t === 1) return t;
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  return t * t * (3 - 2 * t);
 };
+
+/** Peak slope (max f′) of each built-in curve, i.e. peak velocity as a multiple of the average velocity. */
+export const EASE_PEAK_SLOPE = {
+  linear: 1,
+  easeInOutCubic: 1.5,
+  easeOutCubic: 3,
+  easeOutQuart: 4,
+  easeInOutSine: Math.PI / 2,
+  easeOutBack: 1.6 + 3, // c + 3 at t = 0
+} as const;
 
 export const easeOutCubic: Ease = (raw) => {
   const t = unit(raw);
