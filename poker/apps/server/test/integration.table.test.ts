@@ -14,19 +14,10 @@ import {
 } from '@poker/engine';
 import { GameSettingsSchema, type GameSettingsInput, type HandEventMessage, type TableStatusMessage } from '@poker/protocol';
 import type { Pool } from 'pg';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer } from '../src/server.js';
 import { testConfig, testDb } from '../src/test/helpers.js';
 import { Bot, type BotHand } from './bots.js';
-
-// applyHostCommand (S17) is still a stub in checkpoint 5; S8's own tests mock it the same way. This minimal
-// stand-in only covers the commands these tests send (`end`, `start`). Remove once S17 lands.
-vi.mock('../src/realtime/hostControls.js', () => ({
-  applyHostCommand: (settings: unknown, status: string, cmd: { kind: string }) =>
-    cmd.kind === 'end' || cmd.kind === 'start'
-      ? { settings, status, effects: [cmd.kind] }
-      : { error: `${cmd.kind} is not supported by the test stand-in` },
-}));
 
 type Server = Awaited<ReturnType<typeof createServer>>;
 
