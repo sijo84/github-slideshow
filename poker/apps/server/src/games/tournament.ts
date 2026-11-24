@@ -83,7 +83,8 @@ export class TournamentController implements TournamentControllerLike {
       !this.finished &&
       rebuys.allowed &&
       this.levelFor(now).level <= rebuys.untilLevel &&
-      this.entrants.has(userId) &&
+      // Not limited to known entrants: canRebuy is asked before the first onHandEnded,
+      // and the TableManager only asks for seated players whose stack is 0.
       !this.places.has(userId)
     );
   }

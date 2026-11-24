@@ -257,16 +257,24 @@ describe('rebuys', () => {
     expect(await walletBalance(pool, c.id)).toBe(before - STACK);
   });
 
-  it('refused for an eliminated player and a non-entrant', async () => {
-    const { gameId, users, ctl } = await setup(['Ann', 'Bob', 'Cid']);
-    const [a, b, c] = users as [User, User, User];
+  it('a player busting in the first hand can rebuy before onHandEnded; an eliminated player cannot', async () => {
+    const { gameId, users, ctl } = await setup(['Ann', 'Bob', 'Cid', 'Dee']);
+    const [a, b, c, d] = users as [User, User, User, User];
+    // First hand: Bob and Cid both bust to Ann. The controller has seen no hand yet.
     await move(gameId, b.id, a.id, STACK);
-    const r = await ctl.onHandEnded(hand([a, STACK, 3000], [b, STACK, 0], [c, STACK, STACK]), T0);
-    expect(r.eliminated).toEqual([{ userId: b.id, place: 3 }]);
-    expect(ctl.canRebuy(b.id, T0)).toBe(false);
-    await expect(ctl.rebuy(b.id, T0)).rejects.toMatchObject({ statusCode: 409 });
-    const stranger = await makeUser(pool, 'Stranger');
-    expect(ctl.canRebuy(stranger.id, T0)).toBe(false);
+    await move(gameId, c.id, a.id, STACK);
+    expect(ctl.canRebuy(b.id, T0)).toBe(true);
+    expect(ctl.canRebuy(c.id, T0)).toBe(true);
+    const before = await walletBalance(pool, b.id);
+    expect(await ctl.rebuy(b.id, T0)).toBe(STACK);
+    expect(await walletBalance(pool, b.id)).toBe(before - STACK);
+
+    // Bob's endStack includes the rebuy; Cid did not rebuy and is eliminated.
+    const r = await ctl.onHandEnded(hand([a, STACK, 4500], [b, STACK, STACK], [c, STACK, 0], [d, STACK, STACK]), T0);
+    expect(r).toEqual({ eliminated: [{ userId: c.id, place: 4 }], finished: false });
+    expect(ctl.canRebuy(c.id, T0)).toBe(false);
+    await expect(ctl.rebuy(c.id, T0)).rejects.toMatchObject({ statusCode: 409 });
+    expect(ctl.canRebuy(b.id, T0)).toBe(true);
   });
 
   it('refused when rebuys are off', async () => {
@@ -292,9 +300,6 @@ describe('finish, end to end', () => {
     const { gameId, users, ctl } = await setup(['Ann', 'Bob', 'Cid']);
     const [a, b, c] = users as [User, User, User];
 
-    expect(ctl.canRebuy(b.id, T0)).toBe(false); // not an entrant until the controller has seen a hand
-    // Hand 0: no chips change hands.
-    await ctl.onHandEnded(hand([a, STACK, STACK], [b, STACK, STACK], [c, STACK, STACK]), T0);
     // Hand 1: Bob loses everything to Ann and rebuys.
     await move(gameId, b.id, a.id, STACK);
     expect(ctl.canRebuy(b.id, T0 + MIN)).toBe(true);

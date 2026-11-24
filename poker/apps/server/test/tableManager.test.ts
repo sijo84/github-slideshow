@@ -39,15 +39,24 @@ import {
 import { fakeClock, makeUser, testDb } from '../src/test/helpers.js';
 import { balance, buyIn, ensureAccount, grant, walletBalance } from '../src/wallet/ledger.js';
 
-// A simple, faithful fake of S17's applyHostCommand (the real one lands in checkpoint 6).
-vi.mock('../src/realtime/hostControls.js', () => ({
-  applyHostCommand: (
-    settings: GameSettings,
-    status: GameStatus,
-    cmd: TableHostCommand,
-    actor: string,
-    hostId: string,
-  ): { settings: GameSettings; status: GameStatus; effects: HostEffect[] } | { error: string } => {
+// A simple, faithful fake of S17's applyHostCommand; tests that set `hostControlsMode.real` use the real one.
+const hostControlsMode = vi.hoisted(() => ({ real: false }));
+vi.mock('../src/realtime/hostControls.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/realtime/hostControls.js')>();
+  return {
+    ...actual,
+    applyHostCommand: (...args: Parameters<typeof actual.applyHostCommand>) =>
+      hostControlsMode.real ? actual.applyHostCommand(...args) : fakeApplyHostCommand(...args),
+  };
+});
+
+function fakeApplyHostCommand(
+  settings: GameSettings,
+  status: GameStatus,
+  cmd: TableHostCommand,
+  actor: string,
+  hostId: string,
+): { settings: GameSettings; status: GameStatus; effects: HostEffect[] } | { error: string } {
     if (actor !== hostId) return { error: 'Only the host can do that' };
     switch (cmd.kind) {
       case 'start':
@@ -65,8 +74,7 @@ vi.mock('../src/realtime/hostControls.js', () => ({
       case 'updateSettings':
         return { settings: { ...settings, ...cmd.settings } as GameSettings, status, effects: [] };
     }
-  },
-}));
+}
 
 let db: Awaited<ReturnType<typeof testDb>>;
 let pool: Pool;
@@ -878,7 +886,9 @@ describe('TableManager', () => {
     const out = await bustSomeone();
     await h.tm.whenIdle(gameId);
     const winner = players.find((p) => p.id !== out.id)!;
-    expect(h.tm.viewFor(gameId, host!.id).seats.map((s) => s.playerId)).toEqual([winner.id]);
+    // The eliminated player is unseated at once; the winner leaves the table when the tournament finishes.
+    expect(c().calls.at(-1)!.find((s) => s.userId === out.id)).toMatchObject({ endStack: 0 });
+    expect(h.tm.viewFor(gameId, host!.id).seats).toEqual([]);
     expect(roomPayloads<TableStatusMessage>(h, 'table:status').at(-1)).toMatchObject({ status: 'finished' });
     const results = roomPayloads<TableResults>(h, 'table:results');
     expect(results).toHaveLength(1);
@@ -971,6 +981,132 @@ describe('TableManager', () => {
     expect(h.errors).toHaveLength(1);
     const hands = await pool.query<{ n: number }>('select count(*)::int as n from hands where game_id = $1', [gameId]);
     expect(hands.rows[0]!.n).toBe(1);
+  });
+
+  describe('with the real host controls', () => {
+    beforeAll(() => {
+      hostControlsMode.real = true;
+    });
+    afterAll(() => {
+      hostControlsMode.real = false;
+    });
+
+    it('lets resume cancel a pause that waits for the end of the hand', async () => {
+      const { h, gameId, players, host } = await setupCash(2);
+      await h.tm.host(gameId, host.id, { kind: 'start' });
+      await waitForHand(h, gameId, host.id);
+      await h.tm.host(gameId, host.id, { kind: 'pause' });
+      await expect(h.tm.host(gameId, host.id, { kind: 'pause' })).rejects.toMatchObject({ code: 'bad_state' });
+      await h.tm.host(gameId, host.id, { kind: 'resume' });
+      await finishHand(h, gameId, players);
+      await waitForHand(h, gameId, host.id);
+      expect(handEventsFor(h, host.id).filter((e) => e.type === 'handStarted')).toHaveLength(2);
+      expect(h.tm.viewFor(gameId, host.id).status).toBe('running');
+      expect(roomPayloads<TableStatusMessage>(h, 'table:status').map((m) => m.status)).not.toContain('paused');
+      const row = await pool.query<{ status: string }>('select status from games where id = $1', [gameId]);
+      expect(row.rows[0]!.status).toBe('running');
+      // A resume with nothing paused is refused.
+      await expect(h.tm.host(gameId, host.id, { kind: 'resume' })).rejects.toMatchObject({ code: 'bad_state' });
+    });
+
+    /**
+     * Plays a whole tournament with the real controller. Every player shoves or calls, except that the button
+     * folds while three players are dealt in: a three-way all-in with equal stacks nearly always busts two
+     * players at once, who then share 2nd place, and the prizes would not be the fixed 1st/2nd/3rd split.
+     */
+    async function playTournament(rebuys: boolean): Promise<void> {
+      const all = await users(3, 10_000);
+      const host = all[0]!;
+      const levels = [
+        { ...LEVEL_1, durationMinutes: 1 },
+        { ...LEVEL_2, durationMinutes: 1 },
+      ];
+      const gameId = await makeGame(
+        host,
+        tournamentSettings({ startingStack: 1500, levels, payouts: [65, 35], rebuys: { allowed: rebuys, untilLevel: rebuys ? 2 : 0 } }),
+        all.slice(1),
+      );
+      const h = harness({ rebuyWaitMs: 5000 });
+      for (const [i, p] of all.entries()) {
+        await h.tm.join(gameId, p.id);
+        await h.tm.sit(gameId, p.id, i, 1500, newClientSeed());
+      }
+      await h.tm.host(gameId, host.id, { kind: 'start' });
+      let rebuyer: User | null = null;
+      for (let i = 0; i < 20_000 && h.tm.viewFor(gameId, host.id).status !== 'finished'; i++) {
+        await h.tm.whenIdle(gameId);
+        const view = h.tm.viewFor(gameId, host.id);
+        if (rebuys && rebuyer === null && h.records.length > 0 && view.handId === null) {
+          const busted = view.seats.find((s) => s.stack === 0);
+          if (busted) {
+            rebuyer = all.find((u) => u.id === busted.playerId)!;
+            await h.tm.rebuy(gameId, rebuyer.id);
+            expect(h.tm.viewFor(gameId, host.id).seats.find((s) => s.playerId === rebuyer!.id)!.stack).toBe(1500);
+            continue;
+          }
+        }
+        const a = actor(h, gameId, all);
+        if (!a) {
+          await step(h, gameId, 50);
+          continue;
+        }
+        const legal = a.view.legal!;
+        const dealt = a.view.seats.filter((s) => s.hasCards).length;
+        const kind: ActionKind =
+          dealt === 3 && a.view.mySeat === a.view.buttonSeat ? 'fold' : legal.canBet || legal.canRaise ? 'allIn' : legal.canCheck ? 'check' : 'call';
+        await h.tm.act(gameId, a.user.id, a.view.handId!, kind);
+      }
+      await h.tm.whenIdle(gameId);
+      expect(h.tm.viewFor(gameId, host.id).status).toBe('finished');
+      expect(h.errors).toEqual([]);
+      if (rebuys) expect(rebuyer).not.toBeNull();
+
+      const pool$ = rebuys ? 6000 : 4500;
+      const expected = [Math.floor((pool$ * 65) / 100), Math.floor((pool$ * 35) / 100), 0];
+      const emitted = roomPayloads<TableResults>(h, 'table:results');
+      expect(emitted).toHaveLength(1);
+      const results = emitted[0]!.results;
+      expect(results.map((r) => [r.place, r.prize])).toEqual([[1, expected[0]], [2, expected[1]], [3, 0]]);
+      const rows = await pool.query<{ user_id: string; place: number; prize: number }>(
+        'select user_id, place, prize from tournament_results where game_id = $1 order by place',
+        [gameId],
+      );
+      expect(rows.rows.map((r) => ({ userId: r.user_id, place: r.place, prize: r.prize }))).toEqual(
+        results.map((r) => ({ userId: r.userId, place: r.place, prize: r.prize })),
+      );
+      for (const r of results) {
+        const entries = r.userId === rebuyer?.id ? 2 : 1;
+        expect(await walletBalance(pool, r.userId)).toBe(10_000 - 1500 * entries + r.prize);
+      }
+      const tables = await pool.query<{ total: number }>(
+        `select coalesce(sum(e.amount), 0)::bigint as total from ledger_accounts a left join ledger_entries e on e.account_id = a.id
+          where a.kind = 'table' and a.game_id = $1 group by a.id`,
+        [gameId],
+      );
+      expect(tables.rows.length).toBe(3);
+      expect(tables.rows.every((r) => r.total === 0)).toBe(true);
+      const sum = await pool.query<{ s: number }>('select coalesce(sum(amount), 0)::bigint as s from ledger_entries');
+      expect(sum.rows[0]!.s).toBe(0);
+      const game = await pool.query<{ status: string }>('select status from games where id = $1', [gameId]);
+      expect(game.rows[0]!.status).toBe('finished');
+      const hands = await pool.query<{ n: number }>('select count(*)::int as n from hands where game_id = $1', [gameId]);
+      expect(hands.rows[0]!.n).toBe(h.records.length);
+      expect(h.records.length).toBeGreaterThanOrEqual(2);
+      const unbalanced = await pool.query(
+        `select p.hand_id from hand_players p join hands x on x.id = p.hand_id where x.game_id = $1 group by p.hand_id having sum(p.net) <> 0`,
+        [gameId],
+      );
+      expect(unbalanced.rowCount).toBe(0);
+      expect(h.tm.viewFor(gameId, host.id).seats).toEqual([]);
+    }
+
+    it('plays a tournament to the end with the real controller', { timeout: 60_000 }, async () => {
+      await playTournament(false);
+    });
+
+    it('plays a tournament with a rebuy to the end with the real controller', { timeout: 60_000 }, async () => {
+      await playTournament(true);
+    });
   });
 });
 

@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { startScheduler } from '../src/games/scheduler.js';
 import { notify } from '../src/notify.js';
+import { TableManager } from '../src/realtime/tableManager.js';
 import { fakeClock, makeUser, testDb } from '../src/test/helpers.js';
 
 const MIN = 60_000;
@@ -27,10 +28,16 @@ afterEach(async () => {
   await pool.query(`update games set status = 'finished' where status = 'scheduled'`);
 });
 
-async function insertGame(host: string, name: string, startsAtMs: number, status = 'scheduled'): Promise<string> {
+async function insertGame(
+  host: string,
+  name: string,
+  startsAtMs: number,
+  status = 'scheduled',
+  settings: Record<string, unknown> = {},
+): Promise<string> {
   const res = await pool.query<{ id: string }>(
-    `insert into games (host, name, settings, starts_at, status) values ($1, $2, '{}'::jsonb, $3, $4) returning id`,
-    [host, name, new Date(startsAtMs), status],
+    `insert into games (host, name, settings, starts_at, status) values ($1, $2, $3::jsonb, $4, $5) returning id`,
+    [host, name, JSON.stringify(settings), new Date(startsAtMs), status],
   );
   const row = res.rows[0];
   if (!row) throw new Error('insert into games returned no row');
@@ -39,6 +46,15 @@ async function insertGame(host: string, name: string, startsAtMs: number, status
 
 async function invite(gameId: string, userId: string, rsvp: string): Promise<void> {
   await pool.query(`insert into game_invites (game_id, user_id, rsvp) values ($1, $2, $3)`, [gameId, userId, rsvp]);
+}
+
+/** Behaves like TableManager.open for the status: a scheduled game becomes open (a no-op once the scheduler claimed it). */
+async function realisticOpen(id: string): Promise<void> {
+  await pool.query(`update games set status = 'open' where id = $1 and status = 'scheduled'`, [id]);
+}
+
+async function startingNow(userId: string): Promise<number> {
+  return (await notes(userId)).filter((n) => n.text.endsWith('is starting now')).length;
 }
 
 async function notes(userId: string): Promise<{ kind: string; text: string; link: string | null }[]> {
@@ -55,8 +71,7 @@ async function statusOf(gameId: string): Promise<string | undefined> {
 }
 
 /** Starts a scheduler on a fake clock; `tick(ms)` advances the clock and waits until the tick has finished and re-armed. */
-function harness(open: (id: string) => Promise<void>, startMs?: number) {
-  const clock = fakeClock(startMs);
+function harness(open: (id: string) => Promise<void>, startMs?: number, clock = fakeClock(startMs)) {
   let armed = 0;
   const tables = { open: vi.fn(open) };
   const stop = startScheduler({
@@ -93,7 +108,7 @@ describe('scheduler', () => {
     await invite(id, no.id, 'no');
     await invite(id, pending.id, 'pending');
 
-    const h = harness(async () => {}, T0);
+    const h = harness(realisticOpen, T0);
     await h.tick(0); // T0
     await h.tick(15_000); // T0 + 15 s, still before the start
     expect(h.tables.open).not.toHaveBeenCalled();
@@ -105,13 +120,16 @@ describe('scheduler', () => {
     expect(await statusOf(id)).toBe('open');
 
     const starting = { kind: 'gameStarting', text: 'Friday Game is starting now', link: `/table/${id}` };
-    for (const u of [host, yes, maybe]) expect(await notes(u.id)).toContainEqual(starting);
+    for (const u of [host, yes, maybe]) {
+      expect(await notes(u.id)).toContainEqual(starting);
+      expect(await startingNow(u.id)).toBe(1);
+    }
     for (const u of [no, pending]) expect(await notes(u.id)).toEqual([]);
 
     // Later ticks neither reopen nor notify again.
     await h.tick(15_000);
     expect(h.tables.open).toHaveBeenCalledTimes(1);
-    expect((await notes(host.id)).filter((n) => n.text.endsWith('is starting now'))).toHaveLength(1);
+    expect(await startingNow(host.id)).toBe(1);
   });
 
   it('sends the 10-minute reminder once across ticks and a restart', async () => {
@@ -183,15 +201,17 @@ describe('scheduler', () => {
     expect(await statusOf(openDue)).toBe('open');
   });
 
-  it('keeps going when tables.open throws for one game', async () => {
+  it('keeps going when tables.open throws for one game, and retries it on the next tick', async () => {
     const T0 = 1_700_400_000_000;
     const host = await makeUser(pool, 'Host Five');
     const bad = await insertGame(host.id, 'Bad Game', T0 - 2 * MIN);
     const good = await insertGame(host.id, 'Good Game', T0 - MIN);
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
 
+    let failBad = true;
     const h = harness(async (id) => {
-      if (id === bad) throw new Error('boom');
+      if (id === bad && failBad) throw new Error('boom');
+      await realisticOpen(id);
     }, T0);
     await h.tick(0);
 
@@ -205,8 +225,84 @@ describe('scheduler', () => {
     ]);
 
     // The loop is still alive and retries the failed game on the next tick.
+    failBad = false;
     await h.tick(15_000);
     expect(h.tables.open.mock.calls.filter(([id]) => id === bad)).toHaveLength(2);
+    expect(h.tables.open.mock.calls.filter(([id]) => id === good)).toHaveLength(1);
+    expect(await statusOf(bad)).toBe('open');
+    const starting = (await notes(host.id)).filter((n) => n.text.endsWith('is starting now'));
+    expect(starting).toEqual([
+      { kind: 'gameStarting', text: 'Good Game is starting now', link: `/table/${good}` },
+      { kind: 'gameStarting', text: 'Bad Game is starting now', link: `/table/${bad}` },
+    ]);
+
+    await h.tick(15_000);
+    expect(await startingNow(host.id)).toBe(2);
+  });
+
+  it('opens the table with the real TableManager and notifies once', async () => {
+    const T0 = 1_700_600_000_000;
+    const host = await makeUser(pool, 'Host Seven');
+    const yes = await makeUser(pool, 'Yes Seven');
+    const maybe = await makeUser(pool, 'Maybe Seven');
+    const no = await makeUser(pool, 'No Seven');
+    const settings = {
+      kind: 'cash',
+      maxSeats: 6,
+      levels: [{ level: 1, smallBlind: 5, bigBlind: 10, ante: 0, anteKind: 'none', durationMinutes: 60 }],
+      minBuyIn: 100,
+      maxBuyIn: 1000,
+      startingStack: 0,
+      rebuys: { allowed: false, untilLevel: 0 },
+      payouts: [100],
+      seatApproval: false,
+      autoStart: false,
+      showAllInEquity: true,
+      timeBankSeconds: 0,
+    };
+    const id = await insertGame(host.id, 'Real Game', T0 + 20_000, 'scheduled', settings);
+    await invite(id, yes.id, 'yes');
+    await invite(id, maybe.id, 'maybe');
+    await invite(id, no.id, 'no');
+
+    const clock = fakeClock(T0);
+    const emits: { target: string; event: string }[] = [];
+    const tm = new TableManager({
+      pool,
+      clock: clock.now,
+      setTimer: clock.setTimer,
+      clearTimer: clock.clearTimer,
+      emitTo: (target, event) => emits.push({ target, event }),
+      emitRoom: (target, event) => emits.push({ target, event }),
+      seedWaitMs: 0,
+      runoutPacingMs: 0,
+      handDelayMs: 0,
+      autoStartMs: 0,
+      rebuyWaitMs: 0,
+      logger: { info: () => undefined, error: () => undefined },
+    });
+    try {
+      const h = harness((gameId) => tm.open(gameId), T0, clock);
+      await h.tick(0);
+      await h.tick(15_000);
+      expect(tm.isOpen(id)).toBe(false);
+      expect(await statusOf(id)).toBe('scheduled');
+
+      await h.tick(15_000); // past the start
+      expect(tm.isOpen(id)).toBe(true);
+      expect(await statusOf(id)).toBe('open');
+      for (const u of [host, yes, maybe]) {
+        expect((await notes(u.id)).filter((n) => n.text === 'Real Game is starting now' && n.link === `/table/${id}`)).toHaveLength(1);
+      }
+      expect(await notes(no.id)).toEqual([]);
+
+      await h.tick(15_000);
+      for (const u of [host, yes, maybe]) expect(await startingNow(u.id)).toBe(1);
+      expect(h.tables.open).toHaveBeenCalledTimes(1);
+    } finally {
+      for (const stop of stops.splice(0)) stop();
+      tm.shutdown();
+    }
   });
 
   it('stop prevents further ticks, even when called during a tick', async () => {

@@ -1074,4 +1074,30 @@ Review run 2026-11-24 by a fresh sub-agent (checked versions with `npm view` and
   - S13: `hostControls` is mocked in the integration test until S17 lands (**remove that mock in checkpoint 6**). Bots throttle themselves under the 10 events/s limit and sit again after busting.
 - Still open: `playwright.config.ts` must start the server with `REGISTRATION=open` and raised rate limits for e2e (checkpoint 7).
 
-Next: checkpoint 6.
+### Checkpoint 6: Games, tournaments, host controls, history, stats, integrity, 2026-11-24 (passed)
+- Lead: Fable 5.2. All 7 sub-agents ran on Opus. A work-in-progress commit (`344084e`) was pushed part-way to guard against another restart.
+- Check, run by the lead: `npm run lint` exit 0, `npm run typecheck` exit 0, `npx vitest run`: 30 files, 535 tests passed.
+- Live check by the lead (real server, curl): Ana and Ben registered and became friends; Ana created a cash game starting 3 s later and invited Ben; Ben RSVP'd yes and downloaded the `.ics` (200, `text/calendar`); after the start time the status was `open` and Ben had the notifications "Friday game is starting now" (link `/table/<id>`), "Ana invited you to Friday game" and the friend request; `GET /api/games/:id/fairness` answered 409 before the game ended.
+- Bugs found by the lead and fixed by the owning sub-agents:
+  - S15 + S8 together: the "starting now" notifications were never sent, because `TableManager.open` already sets the status to `open` and the scheduler then saw no row change. The scheduler now claims the game first (status update), then opens the table, then notifies; if opening fails it puts the status back. A test with the real TableManager covers it. Found in the live check, not by the unit tests.
+  - S16: a player busting in the tournament's first hand could not rebuy, because the controller only knew entrants after the first reported hand. `canRebuy` now allows any player who is not eliminated. (S16 raised this itself.)
+  - S8: a `resume` while a pause was still waiting for the hand to end was rejected. The manager now passes the effective status to `applyHostCommand`.
+  - S8, found by its new end-to-end test with the real `TournamentController`: after the prize sweep the winner was still shown seated with chips. `finishGame` now unseats remaining tournament players.
+- New tests asked for by the lead: a whole tournament through the real TableManager, real controller and real host controls (3 players: prizes 2925 / 1575 / 0; with one rebuy: 3900 / 2100 / 0; wallets, zero table balances and a zero ledger sum checked). S13's integration test now runs against the real `applyHostCommand` (its mock is gone).
+- Mutation checks (Edit tool; all six touched files matched their sha256 afterwards and the 535 tests passed again):
+  - AC1 `routes/games.ts`, access check `if (false)`: "non-invited user gets 403" failed.
+  - AC2 `scheduler.ts`, due condition an hour late: "opens table at starts_at and notifies RSVP yes" and 2 others failed.
+  - AC18 `tournament.ts`, ties by user id: both same-hand bust tests failed.
+  - AC9 `collusion.ts`, threshold 300: 2 `integrity.test.ts` tests failed.
+  - AC8/AC14 `redact` unchanged: 5 `history.test.ts` tests failed, including "player B fetching a hand where A folded gets no A cards".
+  - AC17 `settlement.ts`, transfer recorded as `chips - 1`: both F2 settlement tests in `games.test.ts` failed.
+- Plan additions (routes beyond the task text): `POST /api/games/:id/open` (host opens the table now, without waiting for the scheduler), `GET /api/games/:id/results` (S16, F3), `GET /api/games/:id/fairness` (S19, F1), `POST /api/games/:id/integrity/run`.
+- Deviations accepted:
+  - games: the exact 403 line is in `GET /games/:id`; calendar and settlement use a shared member check. Settlement answers 409 "Results are not final yet" when nets do not sum to 0.
+  - tournament: prizes of unfilled places go to place 1. Two players busting in the same hand with equal start stacks share a place and split those prizes (AC18), so a 3-way all-in can end 2925 / 788 / 787. **W-E2E-3 must not assume distinct places.** The finish pays prizes with `transfer` inside one transaction, not `grant`.
+  - host controls: `pause` only while running, `resume` only while paused; unchanged `kind`/`maxSeats` values are accepted after the start.
+  - integrity: flags with non-uuid player ids are not stored; a live flag already stored is listed once.
+  - history: the list also takes `before` as an ISO timestamp; fairness is open to the host, invited users and anyone who played.
+  - stats: hole cards are stripped in SQL before `computeStats`.
+
+Next: checkpoint 7. Start a fresh session on Fable: this session's context is near half.

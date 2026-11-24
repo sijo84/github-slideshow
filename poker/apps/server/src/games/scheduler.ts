@@ -61,9 +61,20 @@ export function startScheduler(deps: SchedulerDeps): () => void {
   };
 
   const open = async (game: ScheduledGame): Promise<void> => {
-    await deps.tables.open(game.id);
-    const res = await pool.query(`update games set status = 'open' where id = $1 and status = 'scheduled'`, [game.id]);
-    if (res.rowCount === 0) return; // someone else changed the status; they own the notification
+    // Claim the game first: the table manager's open() itself moves a scheduled game to 'open',
+    // so the status change is what guarantees one opening and one round of notifications.
+    const claim = await pool.query(
+      `update games set status = 'open' where id = $1 and status = 'scheduled' returning id`,
+      [game.id],
+    );
+    if (claim.rowCount === 0) return; // someone else changed the status in the meantime
+    try {
+      await deps.tables.open(game.id);
+    } catch (err) {
+      // Put it back so the next tick retries; no notifications for a table that did not open.
+      await pool.query(`update games set status = 'scheduled' where id = $1 and status = 'open'`, [game.id]);
+      throw err;
+    }
     for (const userId of await recipients(pool, game)) {
       await deps.notify(pool, userId, 'gameStarting', `${game.name} is starting now`, `/table/${game.id}`);
     }

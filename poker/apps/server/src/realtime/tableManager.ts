@@ -481,7 +481,9 @@ export class TableManager {
       }
       const current = table.pendingSettings ?? table.settings;
       // The cast only matters until the protocol's HostCommand gains { kind: 'end' } (S12).
-      const res = applyHostCommand(current, toDbStatus(table.status), cmd as HostCommand, userId, table.hostId);
+      // A pause that waits for the end of the hand already counts: resume cancels it, a second pause is refused.
+      const effective: GameStatus = table.pauseRequested ? 'paused' : toDbStatus(table.status);
+      const res = applyHostCommand(current, effective, cmd as HostCommand, userId, table.hostId);
       if ('error' in res) throw err.badState(res.error);
       if (cmd.kind === 'updateSettings') await this.updateSettings(table, res.settings);
       const playerId = 'playerId' in cmd ? cmd.playerId : null;
@@ -1049,6 +1051,8 @@ export class TableManager {
       for (const seat of [...table.seats.values()]) await this.unseat(table, seat, true);
     } else if (table.controller) {
       results = await table.controller.results();
+      // The controller swept the table accounts into the prize pool, so the remaining stacks are gone.
+      for (const seat of [...table.seats.values()]) await this.unseat(table, seat, false);
     } else {
       // A tournament ended before it started: the buy-ins go back.
       results = [];
