@@ -826,6 +826,8 @@ Review run 2026-11-24 by a fresh sub-agent (checked versions with `npm view` and
 
   A task that needs anything else stops and asks the lead, who adds it to this plan and installs it.
 
+  Added by the lead at checkpoint 3: `zod@4.6.7` as a direct dependency of `@poker/server` (routes validate request bodies; the version matches `@poker/protocol`).
+
 **F10 (should-fix) Interfaces used but never defined.** Add these as binding I-7, written into the briefs:
 - **Deal-order map (E7 implements it, E2/W11 use it).** Positions 0..(2n−1) are hole cards, dealt round by round starting left of the button: position `r*n + k` is seat order k's card r. After them, in order, come burn, flop ×3, burn, turn, burn, river. Export `dealPositions(n): { hole: number[][]; burns: number[]; board: number[] }` from `hand.ts`.
 - **Component props (CP8):**
@@ -975,4 +977,17 @@ Review run 2026-11-24 by a fresh sub-agent (checked versions with `npm view` and
   - collusion: a pair that qualifies in both directions gives two `chipDumping` flags with the same sorted `players`. **S8 must merge them before the upsert**, because `integrity_flags` is unique on (game, kind, players): keep the higher score and join the summaries. `sharedNetwork` flags have no evidence hands.
   - stats: the highest preflop contribution starts at the largest blind posted; a hand with no end stack for the player adds 0 to `netChips`.
 
-Next: checkpoint 3.
+### Checkpoint 3: Server foundation, 2026-11-24 (passed)
+- Lead: Fable 5.2. Both sub-agents ran on Opus.
+- Before the build the lead wrote section I-8 (detailed server seams) into this plan and committed it (`f574669`).
+- Check, run by the lead (F17 form): `npm run lint` exit 0, `npm run typecheck` exit 0, `npx vitest run --project server`: 2 files, 25 tests passed (migrate 5, app 20). `npm run db:migrate -w @poker/server` ran ("No new migrations." on the second run). The dev server started and `curl -sf localhost:3001/api/health` returned `{"ok":true}`.
+- The check command `npx vitest run apps/server` finds no files when used as a bare directory filter; use `npx vitest run --project server` (a file path such as `apps/server/test/app.test.ts` still works).
+- The lead read `app.ts`, `auth/session.ts`, `test/helpers.ts` and `db/migrate.ts` in full.
+- Mutation checks: none. This checkpoint has no acceptance-criterion tests.
+- Dependency added by the lead: `zod@4.6.7` in `@poker/server` (see F9).
+- Deviations accepted:
+  - S1: `001_init.sql` uses `create table if not exists schema_migrations` (migrate.ts bootstraps that table). `makePool(url, extra?)` takes optional pg options. `bigint` is parsed to a JS number per pool and throws outside the safe range. `testDb` sets the search_path as a connection startup option, with no `connect` handler. The migration lock is per schema.
+  - S2: 5xx errors always answer `{ error: 'Internal error' }`. Zod errors are recognised by shape. `Config.trustProxy` is `boolean | number | string`. `buildApp` takes `rateLimitMax` (default 300). `/avatars/*` always carries the strict CSP.
+- Open point for checkpoint 7: the global limit of 300 requests a minute per IP may be too low for e2e runs from one machine; if so, add an env override to `config.ts`.
+
+Next: checkpoint 4.
