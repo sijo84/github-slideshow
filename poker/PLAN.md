@@ -344,6 +344,92 @@ Ledger rule: every transaction is ≥ 2 rows with the same `tx_id` summing to 0.
 - `apps/web/src/anim/tween.ts` (W2) exports `easeInOutCubic, easeOutCubic, easeOutBack, easeOutQuart`, `tween({ id, from, to, durationMs, ease, onUpdate, onDone })` driven by one `requestAnimationFrame` loop, `useTween` hook, and `trace`. When `window.__POKER_TRACE__ = true`, `trace` records `{ id, t, value }` samples into `window.__animTrace` for tests. Vectors are `[x, y, z]` or numbers.
 - `apps/web/src/table/layout.ts` (W5) exports `seatPosition(seat, maxSeats): [x,y,z]` around an ellipse (radii 4.2 × 2.4, seat 0 at bottom centre, clockwise as seen by the viewer, rotated so the viewer's seat is always at bottom centre), plus `dealerPosition`, `potPosition(index)`, `boardPosition(i)` and `betPosition(seat, maxSeats)`.
 
+#### I-8 Server seams in detail (lead, checkpoint 3, written before the build; overrides I-4/I-5 where they differ)
+
+- **Schema (S1):** `001_init.sql` is I-4 without the `create extension` line (F12), and `ledger_accounts` uses `unique nulls not distinct (kind, user_id, game_id)`, so the single bank account (both null) really is unique.
+- **Config (S2 takes over `apps/server/src/config.ts`):** adds `trustProxy` (env `TRUST_PROXY`, default `'loopback'`), `registration` (`REGISTRATION=open|invite`, default `'invite'`), `production` (`NODE_ENV === 'production'`). A relative `AVATAR_DIR` and the default are resolved against the server package root (`apps/server`), not the working directory.
+- **App deps:** `buildApp` decorates `app.deps = { pool, config, clock }` (`clock: () => number`, default `Date.now`). Route plugins read the pool from `app.deps.pool`. `types.d.ts` declares `deps`, `tables: TableManager` and `req.user`.
+- **Sessions (`auth/session.ts`):**
+  ```ts
+  export interface SessionUser { id: string; displayName: string }
+  export const SESSION_COOKIE = 'sid';
+  export function createSession(pool: Pool, userId: string, ip: string, deviceId: string): Promise<{ value: string; expiresAt: Date }>; // value = 32 CSPRNG bytes base64url; the row id is sha256(value) hex
+  export function destroySession(pool: Pool, cookieValue: string): Promise<void>;
+  export function setSessionCookie(reply: FastifyReply, config: Config, session: { value: string; expiresAt: Date }): void;
+  export function clearSessionCookie(reply: FastifyReply, config: Config): void;
+  export function userFromRequest(req: FastifyRequest): Promise<SessionUser | null>;
+  export function requireUser(req: FastifyRequest, reply: FastifyReply): Promise<void>; // preHandler: sets req.user or replies 401 { error: 'Not signed in' }
+  export function userFromCookieHeader(pool: Pool, cookieHeader: string | undefined): Promise<SessionUser | null>;
+  export function deviceIdFrom(req: FastifyRequest): string; // header x-device-id (max 64 chars), else 'unknown'
+  ```
+- **Errors:** every REST error body is `{ error: string }`.
+- **Test helpers (`src/test/helpers.ts`, S1):**
+  ```ts
+  export function testDb(): Promise<{ pool: Pool; schema: string; cleanup: () => Promise<void> }>;
+  export function testConfig(overrides?: Partial<Config>): Config;      // loadConfig({}) + registration 'open' + a temp avatarDir + overrides
+  export function makeUser(pool: Pool, name: string): Promise<{ id: string; email: string; displayName: string }>;
+  export function authed(app: FastifyInstance, user: { id: string }): Promise<{ cookie: string; origin: string }>; // headers for app.inject: a real session cookie plus the Origin the CSRF hook accepts
+  export function fakeClock(startMs?: number): { now: () => number; setTimer: (fn: () => void, ms: number) => number; clearTimer: (h: unknown) => void; advance: (ms: number) => Promise<void> }; // advance fires due timers in time order and awaits microtasks between them
+  ```
+- **Migrations:** `db/migrate.ts` exports `migrate(pool: Pool, dir?: string): Promise<string[]>` (names applied now). Later migrations: `002_seeds.sql` (S8), `003_invites.sql` (S3).
+- **Stubs S2 creates (bodies throw `new Error('not implemented')` unless noted):**
+  ```ts
+  // wallet/ledger.ts (S7)
+  export type Queryable = Pool | PoolClient;
+  export type AccountKind = 'wallet' | 'table' | 'bank';
+  export class InsufficientFundsError extends Error {}
+  export function ensureAccount(db: Queryable, kind: AccountKind, userId?: string | null, gameId?: string | null): Promise<string>; // account id
+  export function transfer(client: PoolClient, fromAcct: string, toAcct: string, amount: number, reason: string): Promise<string>; // tx id; the caller owns the transaction
+  export function balance(db: Queryable, acct: string): Promise<number>;
+  export function walletBalance(db: Queryable, userId: string): Promise<number>;
+  export function grant(pool: Pool, userId: string, amount: number, reason: string): Promise<void>;       // bank → wallet
+  export function buyIn(pool: Pool, userId: string, gameId: string, amount: number): Promise<void>;       // wallet → table account (kind 'table', that user, that game)
+  export function cashOut(pool: Pool, userId: string, gameId: string, amount: number): Promise<void>;     // table account → wallet
+  // notify.ts (S10)
+  export type NotifyKind = 'invite' | 'gameStarting' | 'friendRequest' | 'seatRequest' | 'integrityFlag';
+  export interface NotifyPayload { id: string; kind: NotifyKind; text: string; link?: string }
+  export function setNotifyEmitter(fn: ((userId: string, payload: NotifyPayload) => void) | null): void;
+  export function notify(pool: Pool, userId: string, kind: NotifyKind, text: string, link?: string): Promise<NotifyPayload>;
+  // realtime/hostControls.ts (S17)
+  export type GameStatus = 'scheduled' | 'open' | 'running' | 'paused' | 'finished' | 'cancelled';
+  export type HostEffect = 'start' | 'kick' | 'pause' | 'resume' | 'approve' | 'reject';
+  export function applyHostCommand(settings: GameSettings, status: GameStatus, cmd: HostCommand, actor: string, hostId: string): { settings: GameSettings; status: GameStatus; effects: HostEffect[] } | { error: string };
+  // games/scheduler.ts (S15) – the stub returns a no-op stop function
+  export interface SchedulerDeps { pool: Pool; clock: () => number; setTimer: (fn: () => void, ms: number) => unknown; clearTimer?: (h: unknown) => void; tables: { open(gameId: string): Promise<void> }; notify: typeof notify }
+  export function startScheduler(deps: SchedulerDeps): () => void;
+  // games/tournament.ts (S16)
+  export interface TournamentControllerLike {
+    levelFor(now: number): BlindLevel;
+    onHandEnded(stacks: { userId: string; startStack: number; endStack: number }[], now: number): Promise<{ eliminated: { userId: string; place: number }[]; finished: boolean }>;
+    canRebuy(userId: string, now: number): boolean;
+    rebuy(userId: string, now: number): Promise<number>;   // chips added to the stack
+    results(): Promise<ResultEntry[]>;
+  }
+  export class TournamentController implements TournamentControllerLike { constructor(deps: { pool: Pool; gameId: string; settings: GameSettings; startedAtMs: number; pausedMs: () => number }); /* methods throw */ }
+  export function prizes(prizePool: number, payouts: number[], finishOrder: string[][]): { userId: string; place: number; prize: number }[]; // finishOrder: best first; an inner array is a tie
+  // realtime/tableManager.ts (S8 replaces it in checkpoint 5)
+  export interface TableManagerDeps { pool: Pool; clock: () => number; setTimer: (fn: () => void, ms: number) => unknown; clearTimer: (h: unknown) => void;
+    emitTo: (userId: string, event: ServerEventName, payload: unknown) => void; emitRoom: (gameId: string, event: ServerEventName, payload: unknown) => void;
+    seedWaitMs?: number; runoutPacingMs?: number }
+  export class TableManager {
+    constructor(deps: TableManagerDeps);
+    open(gameId: string): Promise<void>; isOpen(gameId: string): boolean;
+    join(gameId: string, userId: string): Promise<TableView>;
+    sit(gameId: string, userId: string, seat: number, buyIn: number, clientSeed: string): Promise<void>;
+    leave(gameId: string, userId: string): Promise<void>;
+    act(gameId: string, userId: string, handId: string, kind: ActionKind, amount?: number): Promise<void>;
+    setClientSeed(gameId: string, userId: string, handNumber: number, clientSeed: string): void;
+    useTimeBank(gameId: string, userId: string): Promise<void>;
+    rebuy(gameId: string, userId: string): Promise<void>;
+    host(gameId: string, userId: string, cmd: HostCommand): Promise<void>;
+    setConnected(gameId: string, userId: string, connected: boolean): void;
+    pendingSeatRequests(gameId: string): { playerId: string; name: string }[];
+    results(gameId: string): Promise<ResultEntry[]>;
+    onHandEnded(listener: (gameId: string, record: HandRecord) => void): void;
+  }
+  ```
+  Route stubs: `routes/{auth,profile,friends,notes,wallet,games,history,stats,integrity,notifications,results}.ts`, each `export default async function (app: FastifyInstance): Promise<void> {}`, all registered under the prefix `/api`.
+
 ---
 
 ## Tasks
