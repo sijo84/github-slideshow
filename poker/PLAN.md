@@ -575,7 +575,8 @@ Each checkpoint: run its check → fix until green → check the real files (not
 1. **Read this whole plan first**, including "Review findings" at the end, which override earlier text where they conflict.
 2. **You are the lead. You write no code.** Your jobs: dispatch sub-agents, run checks, review files, do mutation checks, commit, update this plan.
    **Models (user decision, 2026-11-24):** the lead session runs on **Fable** (`claude-fable-5-2`; start the session with that model, e.g. `/model` before saying "Run the plan"). The lead makes the big decisions: interpreting the plan, resolving deviations and questions, deciding fixes when a check fails, and amending this plan. Every sub-agent is started with the Agent tool's `model: "opus"` and does all the building, testing and file editing. If the lead is not running on Fable, it says so to the user before starting checkpoint work.
-3. **Database (once, before checkpoint 0; see F23):**
+3. **Environment:** run every session for this plan on the cloud environment **"Poker App"** (personal), not "My apps (cloud)", which is shared with other apps. Its setup script starts Postgres, creates the databases below, and runs `npm ci` in `poker/`. If the setup script did not run (`pg_lsclusters` shows `down`), run the commands below by hand.
+   **Database (once, before checkpoint 0; see F23):**
    ```bash
    pg_ctlcluster 16 main start
    su postgres -c "psql -c \"create role poker login password 'poker' createdb\""
