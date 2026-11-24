@@ -91,9 +91,13 @@ describe('GameDetail', () => {
   });
 
   it('posts the RSVP and marks the chosen button pressed', async () => {
-    mocks.api.mockImplementation(async (path: string, init?: { method?: string }) => {
-      if (path.endsWith('/rsvp') && init?.method === 'POST') return { rsvp: 'yes' };
-      return game();
+    let myRsvp = 'pending';
+    mocks.api.mockImplementation(async (path: string, init?: { method?: string; body?: { rsvp: string } }) => {
+      if (path.endsWith('/rsvp') && init?.method === 'POST') {
+        myRsvp = init.body?.rsvp ?? myRsvp;
+        return { rsvp: myRsvp };
+      }
+      return game({ myRsvp });
     });
     renderPage();
     const yes = await screen.findByRole('button', { name: 'Yes' });

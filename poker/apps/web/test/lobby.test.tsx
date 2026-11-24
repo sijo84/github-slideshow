@@ -53,7 +53,9 @@ function renderLobby() {
   );
 }
 
-beforeEach(() => mocks.api.mockReset());
+beforeEach(() => {
+  mocks.api.mockReset();
+});
 afterEach(() => cleanup());
 
 describe('Lobby', () => {

@@ -38,7 +38,9 @@ function renderFriends() {
   );
 }
 
-beforeEach(() => mocks.api.mockReset());
+beforeEach(() => {
+  mocks.api.mockReset();
+});
 afterEach(() => cleanup());
 
 describe('Friends', () => {
