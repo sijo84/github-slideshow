@@ -280,10 +280,12 @@ describe('client -> server messages', () => {
     bad(ChatSendSchema, { gameId: GAME, text: '' });
   });
 
-  it('host:command start/pause/resume/kick/approveSeat', () => {
+  it('host:command start/pause/resume/end/kick/approveSeat', () => {
     ok(HostCommandMessageSchema, { gameId: GAME, command: { kind: 'start' } });
     ok(HostCommandMessageSchema, { gameId: GAME, command: { kind: 'pause' } });
     ok(HostCommandMessageSchema, { gameId: GAME, command: { kind: 'resume' } });
+    ok(HostCommandMessageSchema, { gameId: GAME, command: { kind: 'end' } });
+    bad(HostCommandMessageSchema, { gameId: GAME, command: { kind: 'end', now: true } });
     ok(HostCommandMessageSchema, { gameId: GAME, command: { kind: 'kick', playerId: PLAYER } });
     ok(HostCommandMessageSchema, { gameId: GAME, command: { kind: 'approveSeat', playerId: PLAYER, approve: false } });
     bad(HostCommandMessageSchema, { gameId: GAME, command: { kind: 'explode' } });

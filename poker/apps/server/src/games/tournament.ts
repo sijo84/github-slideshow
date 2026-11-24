@@ -5,6 +5,8 @@ import type { Pool } from 'pg';
 
 export interface TournamentControllerLike {
   levelFor(now: number): BlindLevel;
+  /** When the current level ends (ms epoch), or null on the last level. */
+  nextLevelAt(now: number): number | null;
   onHandEnded(
     stacks: { userId: string; startStack: number; endStack: number }[],
     now: number,
@@ -19,6 +21,10 @@ export class TournamentController implements TournamentControllerLike {
   constructor(deps: { pool: Pool; gameId: string; settings: GameSettings; startedAtMs: number; pausedMs: () => number }) {}
 
   levelFor(now: number): BlindLevel {
+    throw new Error('not implemented');
+  }
+
+  nextLevelAt(now: number): number | null {
     throw new Error('not implemented');
   }
 

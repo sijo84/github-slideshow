@@ -2,7 +2,7 @@
 import type { GameSettings, HostCommand } from '@poker/protocol';
 
 export type GameStatus = 'scheduled' | 'open' | 'running' | 'paused' | 'finished' | 'cancelled';
-export type HostEffect = 'start' | 'kick' | 'pause' | 'resume' | 'approve' | 'reject';
+export type HostEffect = 'start' | 'kick' | 'pause' | 'resume' | 'end' | 'approve' | 'reject';
 
 export function applyHostCommand(
   settings: GameSettings,

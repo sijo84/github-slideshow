@@ -370,6 +370,7 @@ export const HostCommandSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('start') }),
   z.strictObject({ kind: z.literal('pause') }),
   z.strictObject({ kind: z.literal('resume') }),
+  z.strictObject({ kind: z.literal('end') }),
   z.strictObject({ kind: z.literal('kick'), playerId: UuidSchema }),
   z.strictObject({ kind: z.literal('approveSeat'), playerId: UuidSchema, approve: z.boolean() }),
   z.strictObject({ kind: z.literal('updateSettings'), settings: PartialGameSettingsSchema }),
