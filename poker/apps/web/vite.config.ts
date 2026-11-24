@@ -8,6 +8,7 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': { target: 'http://localhost:3001', changeOrigin: false },
+      '/avatars': { target: 'http://localhost:3001', changeOrigin: false },
       '/socket.io': { target: 'http://localhost:3001', ws: true },
     },
   },

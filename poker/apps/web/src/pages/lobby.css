@@ -1,0 +1,95 @@
+.lobby-header,
+.game-header {
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lobby-list,
+.game-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.lobby-item,
+.game-list > li {
+  padding: 10px 0;
+  border-top: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+}
+
+.lobby-item:first-child,
+.game-list > li:first-child {
+  border-top: 0;
+}
+
+.lobby-item-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lobby-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.lobby-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 0.9em;
+  margin-top: 4px;
+}
+
+.game-list > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.game-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.game-meta dt {
+  font-weight: 600;
+}
+
+.game-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.rsvp-buttons [aria-pressed='true'] {
+  outline: 2px solid var(--accent, currentColor);
+}
+
+.invite-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.invite-checks label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.friends-form {
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.friends-form .field {
+  flex: 1 1 220px;
+}

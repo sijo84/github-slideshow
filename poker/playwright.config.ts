@@ -14,9 +14,15 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      command: 'npm run dev -w @poker/server',
+      // Reset runs once, before `tsx watch` starts; the server then migrates the empty schema at boot.
+      command: 'npx tsx e2e/reset-db.ts && npm run dev -w @poker/server',
       url: 'http://localhost:3001/api/health',
-      env: { DATABASE_URL: 'postgres://poker:poker@localhost:5432/poker_e2e' },
+      env: {
+        DATABASE_URL: 'postgres://poker:poker@localhost:5432/poker_e2e',
+        REGISTRATION: 'open',
+        RATE_LIMIT_MAX: '100000',
+        AUTH_RATE_LIMIT_MAX: '100000',
+      },
       reuseExistingServer: false,
       timeout: 120_000,
     },

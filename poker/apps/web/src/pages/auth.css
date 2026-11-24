@@ -1,0 +1,95 @@
+/* Page-specific styling for Login and Profile. Shared look comes from src/ui/theme.css. */
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  box-sizing: border-box;
+  background: radial-gradient(
+    ellipse at 50% 30%,
+    var(--felt, #1f6b47) 0%,
+    var(--felt-deep, #134a31) 45%,
+    var(--bg, #121513) 100%
+  );
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  box-sizing: border-box;
+}
+
+.auth-card h1 {
+  margin: 0 0 4px;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.auth-form input,
+.profile-page input[type='text'],
+.profile-page input[type='email'] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.field-error {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--red, #e0605a);
+}
+
+.field-hint {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+}
+
+.auth-toggle {
+  margin-top: 16px;
+  width: 100%;
+}
+
+.profile-page {
+  max-width: 640px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.profile-page section h2 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+}
+
+.avatar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.avatar-img {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--gold, #d9b45a);
+  background: var(--felt-deep, #134a31);
+  flex: none;
+}
+
+.invite-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.04em;
+}
+
+.profile-page .table {
+  width: 100%;
+}
