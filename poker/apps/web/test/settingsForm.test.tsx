@@ -215,11 +215,55 @@ describe('SettingsForm', () => {
     expect(latest.value.levels).toEqual(tournamentLevels);
   });
 
-  it('convertKind keeps the first level for cash', () => {
-    const t = defaultSettings('tournament');
+  it('convertKind keeps the first level of edited tournament levels for cash', () => {
+    const t = { ...defaultSettings('tournament'), levels: standardStructure({ levels: 4, minutes: 20, bbAnteFromLevel4: false }) };
     const c = convertKind(t, 'cash');
     expect(c.levels).toEqual([{ ...t.levels[0]!, level: 1 }]);
     expect(validateSettings(c).ok).toBe(true);
+  });
+
+  it('cash -> tournament: untouched cash defaults become tournament defaults, edits are kept', () => {
+    const cash = defaultSettings('cash');
+    const tour = defaultSettings('tournament');
+    const untouched = convertKind(cash, 'tournament');
+    expect(untouched).toEqual(tour);
+
+    const edited = convertKind({ ...cash, startingStack: 1000, payouts: [60, 40], turnSeconds: 30 }, 'tournament');
+    expect(edited.startingStack).toBe(1000);
+    expect(edited.payouts).toEqual([60, 40]);
+    expect(edited.turnSeconds).toBe(30);
+    expect(edited.rebuys).toEqual(tour.rebuys);
+    expect(edited.minBuyIn).toBe(tour.minBuyIn);
+    expect(validateSettings(edited).ok).toBe(true);
+  });
+
+  it('tournament -> cash: untouched tournament defaults become cash defaults, edits are kept', () => {
+    const cash = defaultSettings('cash');
+    const tour = defaultSettings('tournament');
+    expect(convertKind(tour, 'cash')).toEqual(cash);
+
+    const edited = convertKind({ ...tour, startingStack: 8000, rebuys: { allowed: true, untilLevel: 4 } }, 'cash');
+    expect(edited.startingStack).toBe(8000);
+    expect(edited.rebuys).toEqual({ allowed: true, untilLevel: 4 });
+    expect(edited.payouts).toEqual(cash.payouts);
+    expect(edited.minBuyIn).toBe(cash.minBuyIn);
+    expect(edited.maxBuyIn).toBe(cash.maxBuyIn);
+    expect(edited.levels).toEqual(cash.levels);
+    expect(validateSettings(edited).ok).toBe(true);
+  });
+
+  it('switching kinds in the form restores the cash blinds the user set', () => {
+    const { latest } = renderForm(defaultSettings('cash'));
+    fireEvent.change(screen.getByLabelText('Small blind'), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText('Big blind'), { target: { value: '10' } });
+    const kind = screen.getByLabelText('Game type');
+    fireEvent.change(kind, { target: { value: 'tournament' } });
+    expect(latest.value.startingStack).toBe(defaultSettings('tournament').startingStack);
+    expect(latest.value.payouts).toEqual([50, 30, 20]);
+    fireEvent.change(kind, { target: { value: 'cash' } });
+    expect(latest.value.levels[0]).toMatchObject({ smallBlind: 5, bigBlind: 10 });
+    expect(latest.value.payouts).toEqual([100]);
+    expect(latest.value.minBuyIn).toBe(40);
   });
 
   it('locks kind and seats', () => {

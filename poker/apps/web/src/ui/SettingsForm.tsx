@@ -111,23 +111,53 @@ function nextLevel(last: BlindLevel | undefined): BlindLevel {
   };
 }
 
+/** Fields that take the new kind's default on a kind switch when they still hold the old kind's default. */
+const KIND_DEFAULTED_KEYS = [
+  'minBuyIn',
+  'maxBuyIn',
+  'startingStack',
+  'payouts',
+  'rebuys',
+  'turnSeconds',
+  'timeBankSeconds',
+  'timeBankTopUpSeconds',
+  'seatApproval',
+  'autoStart',
+  'maxSeats',
+] as const satisfies readonly (keyof GameSettings)[];
+
 /**
- * Converts settings to another kind, keeping everything that still makes sense.
- * `stashedLevels` are tournament levels to restore when going back to a tournament.
+ * Converts settings to another kind, keeping everything the user changed.
+ * Fields still at the old kind's default get the new kind's default; edited fields are kept.
+ * `stashedLevels` are tournament levels to restore when going back to a tournament;
+ * `stashedCashLevel` is the cash level to restore when the tournament levels were left untouched.
  */
-export function convertKind(s: GameSettings, kind: Kind, stashedLevels?: BlindLevel[]): GameSettings {
+export function convertKind(
+  s: GameSettings,
+  kind: Kind,
+  stashedLevels?: BlindLevel[],
+  stashedCashLevel?: BlindLevel,
+): GameSettings {
   if (s.kind === kind) return s;
+  const fromDefaults = defaultSettings(s.kind);
+  const toDefaults = defaultSettings(kind);
+  const next: GameSettings = { ...s, kind };
+  for (const key of KIND_DEFAULTED_KEYS) {
+    if (JSON.stringify(s[key]) === JSON.stringify(fromDefaults[key])) {
+      Object.assign(next, { [key]: structuredClone(toDefaults[key]) });
+    }
+  }
   if (kind === 'cash') {
     const first: BlindLevel | undefined = s.levels[0];
     const level: BlindLevel = first ? { ...first, level: 1 } : nextLevel(undefined);
-    return { ...s, kind: 'cash', levels: [level] };
+    // Untouched tournament blinds become the default cash blinds.
+    const untouched = JSON.stringify(s.levels) === JSON.stringify(fromDefaults.levels);
+    const cashLevel = stashedCashLevel ? { ...stashedCashLevel, level: 1 } : toDefaults.levels[0];
+    return { ...next, levels: untouched && cashLevel ? [cashLevel] : [level] };
   }
-  const levels =
-    stashedLevels && stashedLevels.length > 1
-      ? stashedLevels
-      : standardStructure({ levels: 10, minutes: 15, bbAnteFromLevel4: true });
-  const payouts = s.payouts.reduce((a, b) => a + b, 0) === 100 ? s.payouts : [50, 30, 20];
-  return { ...s, kind: 'tournament', levels: renumber(levels), payouts };
+  const levels = stashedLevels && stashedLevels.length > 1 ? stashedLevels : toDefaults.levels;
+  const payouts = next.payouts.reduce((a, b) => a + b, 0) === 100 ? next.payouts : toDefaults.payouts;
+  return { ...next, levels: renumber(levels), payouts };
 }
 
 function ordinal(n: number): string {
@@ -244,6 +274,7 @@ export function SettingsForm(props: {
   const uid = useId();
   const id = (name: string): string => `${uid}-${name}`;
   const stash = useRef<BlindLevel[] | undefined>(s.kind === 'tournament' ? s.levels : undefined);
+  const cashStash = useRef<BlindLevel | undefined>(s.kind === 'cash' ? s.levels[0] : undefined);
   const [presetLevels, setPresetLevels] = useState(10);
   const [presetMinutes, setPresetMinutes] = useState(15);
   const [presetAnte, setPresetAnte] = useState(true);
@@ -306,7 +337,8 @@ export function SettingsForm(props: {
               onChange={(e) => {
                 const kind = e.target.value as Kind;
                 if (s.kind === 'tournament') stash.current = s.levels;
-                onChange(convertKind(s, kind, stash.current));
+                else cashStash.current = s.levels[0];
+                onChange(convertKind(s, kind, stash.current, cashStash.current));
               }}
             >
               <option value="cash">Cash game</option>
