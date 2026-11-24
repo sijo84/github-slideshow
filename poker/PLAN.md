@@ -20,6 +20,8 @@ As someone who plays poker with friends, I want a private web app where I can sc
 - Scope: the full app, built in staged checkpoints.
 - "Certified RNG" means a cryptographically secure shuffle with a verifiable commit-reveal log. A paid lab certification (e.g. GLI/iTech) is out of scope.
 - The settlement calculator only works out who pays whom. The app never takes, holds or sends real money, and the in-game currency can never be bought or cashed out.
+- (2026-11-24, after review) Chips are shown as play-money dollars: 1 chip = $1, written `$1,250`. Settlement lists who owes whom **in these play dollars** ("Ben owes Ana $1,250"), with no real-money conversion in the app. Players settle real money among themselves outside the app. Every money-looking figure carries the label "play money" somewhere visible on the page.
+- (2026-11-24, after review) Shuffle seeds are revealed **when the game ends**, not after each hand, so folded cards cannot be rebuilt during play. During play, every card a player receives is checked against a per-card commitment published at the start of the hand. See Review findings F1.
 
 ### Assumptions made by the planner (the user may veto before the build)
 
@@ -40,7 +42,7 @@ Each one has a test in "Proof".
 - **AC4 Smooth motion.** Card dealing, chip bets, pot collection, pot awards, card flips, seat changes and panel transitions all move through eased tweens. No element jumps more than 2× the average per-frame step of its tween, and no table object changes position without a tween.
 - **AC5 Turn indicator.** Exactly one seat is highlighted as the active player while a decision is pending, with a countdown ring for the turn timer and a separate indication when the time bank is being used.
 - **AC6 Correct dealer.** The engine implements NLHE rules: button movement, small/big blind (heads-up: button posts small blind and acts first preflop), antes (none / every player / big-blind ante), min-bet and min-raise rules, short all-ins that do not reopen betting, uncalled bets returned, side pots, showdown order, split pots with odd chips going to the first eligible seat left of the button. Chips are always conserved.
-- **AC7 Fair shuffle.** Each hand's deck comes from a CSPRNG server seed combined with players' client seeds. The SHA-256 commitment of the server seed is published before client seeds are collected. The seed is revealed at hand end, and any player can verify the deck in the browser.
+- **AC7 Fair shuffle.** Each hand's deck comes from a CSPRNG server seed combined with players' client seeds. The SHA-256 commitment of the server seed is published before client seeds are collected. At hand start the server also publishes 52 per-card commitments; every card a player receives (hole and board) comes with its salt, and the browser checks it. All hand seeds are revealed when the game ends, and any player can then verify every deck in the browser.
 - **AC8 Anti-cheating.** The server is the only authority: clients never receive the deck or other players' hidden cards. Every action is validated against `legalActions`. Actions and chat are rate-limited. One account can hold only one seat per table. Several accounts sharing an IP address or device id in one game are flagged.
 - **AC9 Collusion detection.** After each hand (and on demand), the analyser flags chip dumping, soft play, and shared IP/device for the host's integrity panel, with the evidence hands listed.
 - **AC10 Timers.** When the turn timer runs out, the player's time bank is used automatically. When both are gone, the server checks if possible, otherwise folds. The time bank tops up as the host configured.
@@ -50,7 +52,7 @@ Each one has a test in "Proof".
 - **AC14 Hand history and replayer.** Every hand is stored as an event log. Users can list hands of games they played and replay any of them step by step (play/pause/step/speed) on the same 3D table. They see only cards they were entitled to see at the time, plus cards shown at showdown.
 - **AC15 Host controls.** Before and during a game the host can set the blind level schedule, min/max buy-in, ante type and size, turn timer, time bank, rebuys, starting stack and payouts. The host can also pause/resume, approve seats and remove a player. Changes made during play take effect from the next hand.
 - **AC16 Virtual currency.** Every user has a chip wallet backed by a double-entry ledger. Chips come from a signup grant and host grants only, and there is no purchase path. Buy-ins and cash-outs move chips between wallet and table. Balances never go negative and the ledger always sums to zero.
-- **AC17 Settlement.** For a game, the calculator takes each player's net chip result and a host-set money value per chip (integer cents per 1,000 chips). It outputs at most n−1 transfers ("Ana pays Ben €12.50") that sum exactly to zero, rounding to the cent with the remainder assigned deterministically, plus a copyable text summary and a "no money is handled by this app" notice.
+- **AC17 Settlement.** For a game, the calculator takes each player's net chip result (cash: sum of hand nets; tournament: prize − buy-in − rebuys) and outputs at most n−1 transfers in play dollars ("Ben owes Ana $1,250") that sum exactly to zero, plus a copyable text summary and the notice "Play money only. Settle any real-money arrangements among yourselves, outside this app."
 - **AC18 Tournaments.** Blind levels rise on the host's schedule, eliminated players get finishing places (ties by starting stack size of the hand, then split), and the prize pool of virtual chips is paid out by the payout table.
 
 ### Done means
@@ -146,7 +148,7 @@ export interface HandConfig {
 }
 
 export type HandEvent =
-  | { type: 'handStarted'; handId: string; handNumber: number; buttonSeat: SeatIndex; stakes: Stakes; seats: SeatInput[]; commitment: string }
+  | { type: 'handStarted'; handId: string; handNumber: number; buttonSeat: SeatIndex; stakes: Stakes; seats: SeatInput[]; commitment: string; cardCommitments: string[] }
   | { type: 'postAnte'; seat: SeatIndex; amount: Chips }
   | { type: 'postBlind'; seat: SeatIndex; blind: 'small' | 'big'; amount: Chips }
   | { type: 'dealHole'; seat: SeatIndex; cards: Card[] }          // cards = [] in any view not entitled to them
@@ -159,7 +161,8 @@ export type HandEvent =
   | { type: 'muck'; seat: SeatIndex }
   | { type: 'equity'; street: Street; equities: { seat: SeatIndex; win: number; tie: number }[] }
   | { type: 'potAwarded'; potIndex: number; seats: SeatIndex[]; amounts: Chips[]; handName?: string }
-  | { type: 'handEnded'; stacks: { seat: SeatIndex; stack: Chips }[]; seedReveal: string; clientSeeds: string[]; nextCommitment: string };
+  | { type: 'cardProof'; position: number; card: Card; salt: string }   // sent only to viewers entitled to that card (see F1)
+  | { type: 'handEnded'; stacks: { seat: SeatIndex; stack: Chips }[]; clientSeeds: string[]; nextCommitment: string };
 
 /** Full record, server-side only. Views given to clients are made by redact() in the server. */
 export interface HandRecord {
@@ -171,7 +174,7 @@ export interface HandRecord {
 }
 ```
 
-Notes: `toAct`, `equity`, `handStarted.commitment` and the seed fields of `handEnded` are filled in by the server (S8). The engine emits them with `deadline` unset, `commitment: ''`, `seedReveal: ''`, `clientSeeds: []`, `nextCommitment: ''`, and the server overwrites them. The engine never emits `equity`.
+Notes: `toAct`, `equity`, `cardProof`, `handStarted.commitment`/`cardCommitments` and the seed fields of `handEnded` are filled in by the server (S8). The engine emits them with `deadline` unset, `commitment: ''`, `cardCommitments: []`, `clientSeeds: []`, `nextCommitment: ''`, and the server overwrites them. The engine never emits `equity` or `cardProof`. `cardCommitments` holds 52 hex strings, see F1.
 
 #### I-2 Engine module signatures (each task implements its own file)
 
@@ -215,11 +218,11 @@ export function levelAt(levels: BlindLevel[], startedAtMs: number, nowMs: number
 export function validateLevels(levels: BlindLevel[]): string[]; // [] if valid: level numbers 1..n in order, sb >= 1, bb > sb, bb non-decreasing, ante >= 0, durationMinutes >= 1
 
 // settlement.ts (E6)
-export interface Transfer { from: string; to: string; cents: number }
-export function settle(net: { playerId: string; chips: number }[], centsPer1000Chips: number): { transfers: Transfer[]; centsByPlayer: Record<string, number> };
-  // net chips must sum to 0 (throw otherwise). Convert to cents with round-half-even; assign the rounding remainder to players by
-  // descending |chips| then playerId so cents sum to exactly 0. Greedy: largest debtor pays largest creditor. Result has <= n-1 transfers.
-export function settlementText(transfers: Transfer[], names: Record<string, string>, currency: string): string;
+export interface Transfer { from: string; to: string; chips: number }   // replaces the cents version above
+export function settle(net: { playerId: string; chips: number }[]): { transfers: Transfer[] };
+  // net chips must sum to 0 (throw otherwise). Greedy: largest debtor pays largest creditor; ties by playerId. Result has <= n-1 transfers.
+export function formatPlayMoney(chips: number): string;  // 1250 -> "$1,250", -40 -> "-$40"
+export function settlementText(transfers: Transfer[], names: Record<string, string>): string; // lines "Ben owes Ana $1,250" + the play-money notice
 
 // hand.ts (E7)
 export interface HandState { /* opaque to callers; JSON-serialisable */ }
@@ -351,7 +354,7 @@ General rules for every task:
 
 ### Checkpoint 0: Scaffold
 
-**S0.1 Workspace scaffold.** Owns: `package.json`, `package-lock.json`, `tsconfig.base.json`, `eslint.config.js`, `.editorconfig`, `.gitignore`, `.nvmrc`, `vitest.workspace.ts`, `playwright.config.ts`, `packages/engine/{package.json,tsconfig.json,src/*.ts}`, `packages/protocol/{package.json,tsconfig.json,src/index.ts}`, `apps/server/{package.json,tsconfig.json,src/main.ts,src/config.ts}`, `apps/web/{package.json,tsconfig.json,vite.config.ts,index.html,src/main.tsx,src/App.tsx,src/pages/*.tsx}`, `e2e/smoke.spec.ts`, `e2e/global-setup.ts`.
+**S0.1 Workspace scaffold.** Owns: `package.json`, `package-lock.json`, `tsconfig.base.json`, `eslint.config.js`, `.editorconfig`, `.gitignore`, `.nvmrc`, `vitest.config.ts`, `playwright.config.ts`, `packages/engine/{package.json,tsconfig.json,src/*.ts}`, `packages/protocol/{package.json,tsconfig.json,src/index.ts}`, `apps/server/{package.json,tsconfig.json,src/main.ts,src/config.ts}`, `apps/web/{package.json,tsconfig.json,vite.config.ts,index.html,src/main.tsx,src/App.tsx,src/pages/*.tsx}`, `e2e/smoke.spec.ts`, `e2e/global-setup.ts`.
 - npm workspaces: `packages/*`, `apps/*`. Package names: `@poker/engine`, `@poker/protocol`, `@poker/server`, `@poker/web`. Engine and protocol are consumed as TS source through `exports: { ".": "./src/index.ts" }` (server runs with `tsx`, web through Vite), so no build step is needed for them.
 - Root scripts: `lint` (`eslint .`), `typecheck` (`tsc -b` over all packages, or `npm run typecheck --workspaces`), `test` (`vitest run`), `e2e` (`playwright test --trace off`), `dev` (server + web in parallel via `npm-run-all2` or two `&` processes in a `scripts/dev.sh`), `db:migrate`.
 - Pin every version listed in "Environment facts". Use `--save-exact`.
@@ -382,7 +385,7 @@ All tasks code against I-1/I-2 and own only their `src/<module>.ts` and `test/<m
 
 **E5 blinds.** Owns `src/blinds.ts`, `test/blinds.test.ts`. Simplified moving button: the button moves to the next occupied seat clockwise; SB is the next dealt-in seat after the button, BB the next after that; heads-up: button = SB and acts first preflop, BB acts first postflop. No dead-button rule (document this in a comment). Antes are capped at the stack. With `bigBlind` antes, the BB seat posts both; if it cannot cover both, the blind is filled first and the rest goes to the ante (TDA Rule 4), with a test for it. `levelAt` handles paused time. Tests cover 2, 3 and 9 players, wraparound and short stacks. Proof: `npx vitest run packages/engine/test/blinds.test.ts`.
 
-**E6 settlement.** Owns `src/settlement.ts`, `test/settlement.test.ts`. Implement per I-2. Tests: (a) the example `[A +3000, B -1000, C -2000]` at 500 cents/1000 chips gives `B→A 500`, `C→A 1000`; (b) 6 players with random nets give ≤ 5 transfers and cents that sum to 0; (c) fast-check: for any nets that sum to 0, transfers balance each player's cents exactly; (d) throws when the nets do not sum to 0; (e) `settlementText` lists the lines and contains "This app does not handle real money." Proof: `npx vitest run packages/engine/test/settlement.test.ts`.
+**E6 settlement.** Owns `src/settlement.ts`, `test/settlement.test.ts`. Implement per I-2. Tests: (a) `[A +3000, B -1000, C -2000]` gives `B→A 1000`, `C→A 2000`; (b) 6 players with random nets give ≤ 5 transfers; (c) fast-check: for any nets that sum to 0, transfers balance each player exactly; (d) throws when the nets do not sum to 0; (e) `formatPlayMoney` cases; (f) `settlementText` lists the lines and contains "Play money only." Proof: `npx vitest run packages/engine/test/settlement.test.ts`.
 
 **P1 protocol.** Owns `packages/protocol/src/index.ts`, `packages/protocol/test/protocol.test.ts`. zod schemas for every message in I-3, with `export type X = z.infer<typeof X>`. Export `ClientEvents`/`ServerEvents` maps for Socket.IO typing. Re-export the engine types it needs from `@poker/engine` (types only: `import type`). Limits: text 1–200 after trim, ids are UUID strings, amounts are safe non-negative integers, clientSeed `/^[0-9a-f]{32}$/`. `GameSettingsSchema` has `.superRefine`: payouts sum 100, cash has exactly 1 level, `minBuyIn <= maxBuyIn`, and the levels pass the same rules as `validateLevels`. **Reimplement the rule inline here** (the engine stub would throw at this checkpoint) and note the duplication with a comment `// keep in sync with engine/blinds.validateLevels`. Tests: valid and invalid samples for each message. Proof: `npx vitest run packages/protocol`.
 
@@ -438,7 +441,7 @@ Parallel: S3–S7 and S10 all at once (separate files). S3 depends on S7's `gran
 **S8 TableManager.** Owns `apps/server/src/realtime/tableManager.ts`, `apps/server/test/tableManager.test.ts`. Responsibilities:
 - `open(gameId)` loads the game and its settings; status `open`.
 - `sit` checks the user is host or invited (AC1). If `seatApproval` is on and the user is not the host, it queues a request instead of seating. It checks the seat is free, the user is not already seated (AC8), and `minBuyIn ≤ buyIn ≤ maxBuyIn` (cash) or buyIn = startingStack (tournament, debited at the game's buy-in price = startingStack), then calls `ledger.buyIn`.
-- Hand loop: when ≥ 2 seated with chips and status running, generate `serverSeed` (if none pending), emit `hand:commitment` to the room, wait up to 2,000 ms for `table:clientSeed` from each seated player (missing = skip), `deckFromSeeds`, `nextButton`, `startHand`. Fill `handStarted.commitment`. On `handEnded`, fill `seedReveal`, `clientSeeds` and `nextCommitment` (generate the next seed now).
+- Hand loop: when ≥ 2 seated with chips and status running, generate `serverSeed` (if none pending), emit `hand:commitment` to the room, wait up to 2,000 ms for `table:clientSeed` from each seated player (missing = skip), `deckFromSeeds`, `nextButton`, `startHand`. Fill `handStarted.commitment` and `cardCommitments` (per F1). Emit `cardProof` for each card to exactly the viewers entitled to it. On `handEnded`, fill `clientSeeds` and `nextCommitment` (generate the next seed now). Keep the server seeds in the `hand_seeds` table (F1) and reveal them only when the game finishes.
 - Redaction: a pure function `redact(event, viewerSeat)` exported from the same file. `dealHole` for other seats → `cards: []`. Everything else passes through. The engine never puts hole cards anywhere else, except `showCards` which is public.
 - Emits each event per socket via `emitTo(userId, 'hand:event', redact(...))`. Spectators (host not seated) get the viewerSeat=null view.
 - All-in equity: when `allInRunout(state)` becomes true and ≥ 2 players remain, emit `showCards` for each, then an `equity` event per street via `equityExact` (preflop with a fixed-seed rand for 50k samples) before each board card is dealt, pacing streets 1,500 ms apart so the UI can animate.
@@ -457,7 +460,7 @@ Parallel: S8, S12, S13. S13's file depends on both, so its sub-agent writes it a
 
 ### Checkpoint 6: Games, tournaments, host, history, stats, integrity (server; parallel)
 
-**S14 games routes.** Owns `routes/games.ts`, `test/games.test.ts`. `POST /api/games {name, startsAt, settings}` (validated by `GameSettingsSchema` from protocol; startsAt ≥ now − 5 min), `GET /api/games` (games I host or am invited to), `GET /api/games/:id` (403 if not host/invited, AC1), `PATCH /api/games/:id/settings` (host only; stores the settings and, if the table is live, calls `app.tables.host(id, userId, { kind: 'updateSettings', settings })`. `app.tables` is decorated in `main.ts` by S12; in tests, decorate a fake), `POST /api/games/:id/invites {userIds}` (friends only, else 400), `POST /api/games/:id/rsvp {rsvp}`, `GET /api/games/:id/calendar.ics` (via `ics`), `POST /api/games/:id/cancel`, `GET /api/games/:id/settlement?centsPer1000=500&currency=EUR` (net = sum(hand_players.net) per user + tournament prizes − buy-ins; uses `settle`; host and players only). Proof: `npx vitest run apps/server/test/games.test.ts`.
+**S14 games routes.** Owns `routes/games.ts`, `test/games.test.ts`. `POST /api/games {name, startsAt, settings}` (validated by `GameSettingsSchema` from protocol; startsAt ≥ now − 5 min), `GET /api/games` (games I host or am invited to), `GET /api/games/:id` (403 if not host/invited, AC1), `PATCH /api/games/:id/settings` (host only; stores the settings and, if the table is live, calls `app.tables.host(id, userId, { kind: 'updateSettings', settings })`. `app.tables` is decorated in `main.ts` by S12; in tests, decorate a fake), `POST /api/games/:id/invites {userIds}` (friends only, else 400), `POST /api/games/:id/rsvp {rsvp}`, `GET /api/games/:id/calendar.ics` (via `ics`), `POST /api/games/:id/cancel`, `GET /api/games/:id/settlement` (net per F2; uses `settle`; host and players only). Proof: `npx vitest run apps/server/test/games.test.ts`.
 
 **S15 scheduler.** Owns `apps/server/src/games/scheduler.ts`, `test/scheduler.test.ts`. A `startScheduler({ pool, clock, setTimer, tables, notify })` loop every 15 s: games with `status='scheduled'` and `starts_at ≤ now + 10 min` get a one-time "starting in 10 minutes" notification (track it in memory and use an idempotent `notifications` check by link+kind); at `starts_at`, `tables.open(id)`, set status `open`, notify RSVP yes/maybe. Proof: `npx vitest run apps/server/test/scheduler.test.ts`.
 
@@ -503,7 +506,7 @@ Parallel: W1, W2, W3, W4, W-E2E-1. W3/W4 import `api/client.ts` and `anim/tween.
 
 **W10 Chat + notes.** Owns `src/table/ChatPanel.tsx`, `src/table/NotesPopover.tsx`, `test/chat.test.tsx`. Chat: text only (React escapes, never `dangerouslySetInnerHTML`), new messages slide in, auto-scroll unless the user scrolled up, 200 char counter, shows the rate-limit error. Notes popover: textarea + colour tags, autosaves via `PUT /api/notes/:id` debounced 600 ms; the colour tag shows as a dot on the seat (read from a notes map exposed by the popover module: `useNotes()`). Proof: `npx vitest run apps/web/test/chat.test.tsx`.
 
-**W11 Table store + page.** Owns `src/table/useTableStore.ts`, `src/pages/TablePage.tsx`, `src/table/verify.ts`, `test/tableStore.test.ts`. The store applies `table:view`, `hand:event`, `table:clock`, `table:status`, `chat:message` and `hand:commitment` (on commitment: generate `newClientSeed()` and emit `table:clientSeed`; store the commitment). Event → AnimStep mapping per I-6. Numbers update on consume, and the queue is processed in order with no overlap for the same object. Own equity: on `dealHole` for me and on each `street`, post `{hole, board, opponents}` to the equity worker (W12) and set `myEquity` (hide it when I folded). On `equity` events set `allInEquity`. `verify.ts`: on `handEnded`, run `verifyDeck(commitment, seedReveal, clientSeeds, handNumber, ?)`. The client doesn't know the full deck, so instead it verifies that **the cards it saw** (its hole cards and the board, at their deal positions per E7's documented deal order) match `deckFromSeeds(...)`, and shows a "✓ Shuffle verified" tick in the hand log or a red warning. TablePage composes Table3D + Cards + Chips + SeatHud + TurnRing + ActionBar + ChatPanel, plus `<HostPanel gameId />` when the viewer is the host, a sit-down dialog (seat, buy-in slider within limits), a leave button, a hand log, and a status banner (waiting / paused / level x, next level in mm:ss). Test: feeding a recorded event sequence gives the expected queue and final numbers, and numbers do not change before consume. Proof: `npx vitest run apps/web/test/tableStore.test.ts`.
+**W11 Table store + page.** Owns `src/table/useTableStore.ts`, `src/pages/TablePage.tsx`, `src/table/verify.ts`, `test/tableStore.test.ts`. The store applies `table:view`, `hand:event`, `table:clock`, `table:status`, `chat:message` and `hand:commitment` (on commitment: generate `newClientSeed()` and emit `table:clientSeed`; store the commitment). Event → AnimStep mapping per I-6. Numbers update on consume, and the queue is processed in order with no overlap for the same object. Own equity: on `dealHole` for me and on each `street`, post `{hole, board, opponents}` to the equity worker (W12) and set `myEquity` (hide it when I folded). On `equity` events set `allInEquity`. `verify.ts`: on each `cardProof`, check `sha256(salt + ':' + position + ':' + card) === cardCommitments[position]` and that the position matches the deal-order map (F10). On `handEnded`, show "✓ Cards verified" in the hand log if every received card checked out, else a red warning. After the game ends, the Game page offers "Verify whole game", which fetches the revealed seeds (F1) and runs `verifyDeck` and the card commitments for every hand. TablePage composes Table3D + Cards + Chips + SeatHud + TurnRing + ActionBar + ChatPanel, plus `<HostPanel gameId />` when the viewer is the host, a sit-down dialog (seat, buy-in slider within limits), a leave button, a hand log, and a status banner (waiting / paused / level x, next level in mm:ss). Test: feeding a recorded event sequence gives the expected queue and final numbers, and numbers do not change before consume. Proof: `npx vitest run apps/web/test/tableStore.test.ts`.
 
 **W12 Equity worker.** Owns `src/workers/equity.worker.ts`, `src/workers/useEquity.ts`, `test/equity.worker.test.ts`. Runs `equityVsRandom` with 4,000 iterations, then refines to 20,000 and posts again; the latest request cancels older ones. Proof: `npx vitest run apps/web/test/equity.worker.test.ts`.
 
@@ -514,7 +517,7 @@ Parallel: W1, W2, W3, W4, W-E2E-1. W3/W4 import `api/client.ts` and `anim/tween.
 (d) the "Win nn%" badge is visible on my seat only;
 (e) after the hand, `window.__animTrace` holds deal/bet/collect/award tweens, and for each tween id the samples' max |Δ| between consecutive frames ≤ 2.5 × (|to − from| × 16.7 / duration) + ε, the first sample within 5% of `from` and the last equal to `to`;
 (f) the stacks shown sum to the total bought in;
-(g) the hand log shows "✓ Shuffle verified".
+(g) the hand log shows "✓ Cards verified".
 Second test: an all-in preflop between two players shows equity badges on both seats before the flop. Proof: `npm run e2e -- e2e/table.spec.ts`.
 
 Parallel: W5–W12 and W-E2E-2 at once. Components depend only on I-6 store selectors and the tween API. Each unit test uses a hand-built store state.
@@ -525,7 +528,7 @@ Parallel: W5–W12 and W-E2E-2 at once. Components depend only on I-6 store sele
 
 **W14 Host panel.** Owns `src/pages/HostPanel.tsx`, `test/hostPanel.test.tsx`. A slide-over inside TablePage. W11's TablePage renders `<HostPanel gameId={id} />` when the viewer is the host; S0.1 created `HostPanel.tsx` as a stub so this compiles at checkpoint 8. Shows the live level and time to the next level, pause/resume, seat requests approve/reject, kick, an edit-settings form (reuse `SettingsForm` from W4) with a "takes effect next hand" note, a chip grant form, and an integrity flags list (from `/api/games/:id/integrity`) with evidence hand links to the replayer. Proof: `npx vitest run apps/web/test/hostPanel.test.tsx`.
 
-**W15 Wallet + settlement.** Owns `src/pages/Wallet.tsx`, `src/pages/Settlement.tsx`, `test/settlement.page.test.tsx`. Wallet: the balance with a count-up tween, the ledger list, and the banner "Chips have no monetary value and cannot be bought or sold." Settlement: chip value input (cents per 1,000 chips), currency select (EUR, USD, GBP, CHF, other text), a table of nets, the transfers list, a copy-to-clipboard text, and the notice "This app does not handle real money. Settle among yourselves." Proof: `npx vitest run apps/web/test/settlement.page.test.tsx`.
+**W15 Wallet + settlement.** Owns `src/pages/Wallet.tsx`, `src/pages/Settlement.tsx`, `test/settlement.page.test.tsx`. Wallet: the balance in play dollars with a count-up tween, the ledger list, and the banner "Play money: these dollars cannot be bought, sold or withdrawn." Settlement: a table of nets in play dollars, the transfers list ("Ben owes Ana $1,250"), a copy-to-clipboard text, and the notice "Play money only. Settle any real-money arrangements among yourselves, outside this app." Proof: `npx vitest run apps/web/test/settlement.page.test.tsx`.
 
 **W16 Stats page.** Owns `src/pages/Stats.tsx`, `test/stats.page.test.tsx`. Shows the friend's stats with plain-language labels and tooltips explaining VPIP/PFR/AF/WTSD, plus a link to shared hands. Proof: `npx vitest run apps/web/test/stats.page.test.tsx`.
 
@@ -571,7 +574,7 @@ Each checkpoint: run its check → fix until green → check the real files (not
 
 1. **Read this whole plan first**, including "Review findings" at the end, which override earlier text where they conflict.
 2. **You are the lead. You write no code.** Your jobs: dispatch sub-agents, run checks, review files, do mutation checks, commit, update this plan.
-3. **Database (once, before checkpoint 3):**
+3. **Database (once, before checkpoint 0; see F23):**
    ```bash
    pg_ctlcluster 16 main start
    su postgres -c "psql -c \"create role poker login password 'poker' createdb\""
@@ -580,7 +583,7 @@ Each checkpoint: run its check → fix until green → check the real files (not
    su postgres -c "psql -d poker_dev -c 'create extension if not exists pgcrypto'"
    su postgres -c "psql -d poker_e2e -c 'create extension if not exists pgcrypto'"
    ```
-   Tests use `DATABASE_URL=postgres://poker:poker@localhost:5432/poker_test` (set in `vitest.workspace.ts` env for the server project). If the container restarted, run `pg_ctlcluster 16 main start` again.
+   Tests use `DATABASE_URL=postgres://poker:poker@localhost:5432/poker_test` (set in `vitest.config.ts` env for the server project). If the container restarted, run `pg_ctlcluster 16 main start` again.
 4. **At the start of each checkpoint**, start one sub-agent per task in that checkpoint, **all in one message** so they run in parallel. Each brief contains, and only contains:
    - the task id and its full text copied from this plan;
    - the exact list of files it may create or edit (and "edit no other file");
@@ -633,7 +636,7 @@ Each checkpoint: run its check → fix until green → check the real files (not
 | AC14 | `history.test.ts` redaction; `replay.test.ts`; `e2e/history.spec.ts` | In `useReplay.ts`, step back without rebuilding (`index--` only) → state mismatch |
 | AC15 | `hostControls.test.ts`; `tableManager.test.ts` "applies next hand"; `hostPanel.test.tsx` | In `tableManager.ts`, apply `pendingSettings` immediately instead of at `startHand` |
 | AC16 | `wallet.test.ts` concurrency + zero-sum + non-negative | In `ledger.ts`, remove `for update` from the balance select |
-| AC17 | `settlement.test.ts` (a)–(e); `settlement.page.test.tsx`; `e2e/tournament.spec.ts` | In `settlement.ts`, use `Math.round` without assigning the remainder → the sum-zero property fails |
+| AC17 | `settlement.test.ts` (a)–(f); `games.test.ts` settlement nets (F2); `settlement.page.test.tsx`; `e2e/tournament.spec.ts` | In `settlement.ts`, pay `Math.min(debt, credit) - 1` instead of `Math.min(debt, credit)` → the balance property fails |
 | AC18 | `tournament.test.ts` places/prizes/levels; `e2e/tournament.spec.ts` | In `tournament.ts`, place ties by seat number instead of starting stack |
 
 Evaluator correctness (supports AC6): mutation `evaluator.ts` treat the wheel as not a straight → the exhaustive count test fails (straight 10,200 → 9,180).
@@ -667,7 +670,154 @@ Record what was seen, with screenshot paths, under Progress.
 
 (Filled in by the plan reviewer. Where a finding changes a task, the change is written here and overrides the task text.)
 
-_pending review_
+Review run 2026-11-24 by a fresh sub-agent (checked versions with `npm view` and unpacked vitest 5.1.1). It raised 24 findings, listed below with their resolutions. **Each resolution is binding and overrides any task text that conflicts with it.** The tasks named in a resolution own the extra files or work it adds, and checkpoint file ownership still holds.
+
+**F1 (blocker) The seed reveal after each hand leaks folded cards.** The user decided that seeds are revealed when the game ends.
+- I-4: add `create table hand_seeds (hand_id uuid primary key references hands on delete cascade, server_seed text not null, salt_key text not null);` in a new migration, `migrations/002_seeds.sql`, owned by S8.
+- Per-card commitments: `salt_p = hex(HMAC-SHA256(saltKey, 'salt:' + p))`, where `saltKey` is a separate per-hand CSPRNG value, and `cardCommitments[p] = sha256(salt_p + ':' + p + ':' + deck[p])`.
+- E2 adds `cardCommitments(deck, saltKey): string[]`, `cardSalt(saltKey, p)` and `verifyCard(commitment, salt, position, card)`, with tests that include a known-answer vector.
+- S8 emits `cardProof` for hole cards only to their owner. For board cards and shown cards it emits to everyone. It never emits for folded cards or burns.
+- When a game finishes (status `finished`), `GET /api/games/:id/fairness` (S19, in `routes/history.ts`) returns `{ handId, handNumber, commitment, serverSeed, saltKey, clientSeeds }[]` to the host and players. It returns 409 before the game ends.
+- AC14 now reads: "during the game and until it ends, only entitled cards are visible; after the game ends, the published seeds make every deck reconstructable, and the README says so".
+- Tests:
+  - S19: `fairness` returns 409 while the game is running.
+  - S8 and S13: no viewer ever receives a `cardProof` for another seat's unshown hole card.
+- AC7 mutation: in `rng.ts`, change `cardCommitments` to hash `deck[p] + 1`. The card-verify test fails.
+
+**F2 (blocker) Settlement nets are wrong.**
+- For a cash game, net = sum of `hand_players.net`.
+- For a tournament, net = prize − (buy-in + rebuys) × number of entries.
+- S14 tests both, plus a case of a player with a rebuy.
+
+**F3 (blocker) Tournament results, rebuys and payouts have no owner.**
+- I-3 adds `table:rebuy { gameId }` (P1). The server sends `table:results { gameId, results: { userId, name, place, prize }[] }` when the game finishes (P1).
+- S16 pays prizes bank-to-wallet through `ledger.grant`. Buy-ins and rebuys go wallet → `table` account, and at the end the table account is swept to `bank`, so the ledger still sums to 0.
+- S16 also adds `GET /api/games/:id/results` in a new file, `routes/results.ts`, registered by S2 as a stub. Add `results` to S2's list of route stubs.
+- W15 adds `src/pages/Results.tsx` (route `/results/:gameId`, stub created by S0.1).
+- S8 handles `table:rebuy` through the `TournamentController`.
+
+**F4 (blocker) Nothing starts a game.**
+- I-3 `HostCommand` adds `{ kind: 'start' }`, valid only in status `open`.
+- S17 validates it and S8 moves the status from `open` to `running`.
+- Cash games also auto-start when the host has opted in with `settings.autoStart: boolean` (default true). Auto-start begins once ≥ 2 players are seated, after a 5 s countdown.
+- E2E specs click "Start game" as the host.
+- W14 adds a "Start game" button.
+
+**F5 (should-fix) AC4 is only half proven.**
+- W2's `tween()` is the **only** writer of object transforms. Every animated r3f object and HUD element registers through `useTweenedPosition(id)`, which reports its final value each frame into `window.__animTrace` under an `obj:<id>` key, even when no tween is running.
+- The W-E2E-2 assertion (e) runs over all `obj:*` series, including seat-change and panel transitions. Consecutive samples must differ by ≤ 2.5 × the frame-normalised average step of the tween active at that moment. A change with no active tween fails.
+- Owners: W2 adds `useTweenedPosition`, and W-E2E-2 adds a step that moves to another seat and opens and closes the host panel.
+
+**F6 (should-fix) Cleo's 403 is untestable on a single-page route.** W-E2E-1 asserts that `GET /api/games/:id` returns 403 and that the page shows "You don't have access to this game".
+
+**F7 (should-fix) Shared-IP flags fire for everyone in dev.**
+- S2 sets Fastify `trustProxy: config.trustProxy` (env `TRUST_PROXY`, default `loopback`) so `req.ip` takes `x-forwarded-for` from the Vite proxy.
+- `sharedNetwork` ignores loopback IPs (`127.0.0.1`, `::1`) for `sharedIp`, so device id checks still apply in dev.
+- S8 runs `sharedNetwork` over seated players at each `sit` and stores the flags, as well as running `analyse` after each hand.
+- E10 tests the loopback rule.
+
+**F8 (blocker) `vitest.config.ts` no longer exists in Vitest 4+.**
+- S0.1 writes a root `vitest.config.ts` with `test.projects`:
+  - `engine` and `protocol`: environment node.
+  - `server`: node, `env.DATABASE_URL = postgres://poker:poker@localhost:5432/poker_test`, `testTimeout: 30000`, `fileParallelism: true` (each file has its own schema).
+  - `web`: jsdom.
+- Replace every mention of `vitest.config.ts` with `vitest.config.ts`.
+
+**F9 (should-fix) Dependencies are under-assigned.** S0.1 installs every dependency for every package up front, so later tasks never edit `package.json`. This also overrides W1's testing-library note: S0.1 adds those too. Pins come from "Environment facts", plus these, each with `npm view` at S0.1 time and `--save-exact`:
+- root dev: `eslint`, `@eslint/js`, `typescript-eslint`, `globals`, `typescript`, `vitest`, `fast-check`, `@playwright/test@1.63.0`, `npm-run-all2`, `@types/node@22`
+- engine: `@noble/hashes`
+- protocol: `zod`
+- server: `fastify`, `@fastify/cookie`, `@fastify/multipart`, `@fastify/static`, `@fastify/rate-limit`, `socket.io`, `pg`, `argon2`, `ics`, `luxon`, `tsx`
+- server dev: `@types/pg`, `@types/luxon`, `socket.io-client`
+- web: `react`, `react-dom`, `react-router`, `three`, `@react-three/fiber`, `@react-three/drei`, `zustand`, `socket.io-client`
+- web dev: `@types/react`, `@types/react-dom`, `@types/three`, `vite`, `@vitejs/plugin-react`, `jsdom@31.0.1`, `@testing-library/react`, `@testing-library/user-event`, `@testing-library/jest-dom`
+
+  A task that needs anything else stops and asks the lead, who adds it to this plan and installs it.
+
+**F10 (should-fix) Interfaces used but never defined.** Add these as binding I-7, written into the briefs:
+- **Deal-order map (E7 implements it, E2/W11 use it).** Positions 0..(2n−1) are hole cards, dealt round by round starting left of the button: position `r*n + k` is seat order k's card r. After them, in order, come burn, flop ×3, burn, turn, burn, river. Export `dealPositions(n): { hole: number[][]; burns: number[]; board: number[] }` from `hand.ts`.
+- **Component props (CP8):**
+  - `<Cards handId seats mySeat />`
+  - `<Chips />` (reads the store)
+  - `<SeatHud seat />`
+  - `<TurnRing seat />`
+  - `<ActionBar gameId />`
+  - `<ChatPanel gameId />`
+  - `<NotesPopover subjectId anchor onClose />`
+  - `SceneContext = { maxSeats, mySeat, seatPosition(seat), betPosition(seat), potPosition(i), boardPosition(i), dealerPosition }`
+
+  Each component reads everything else from the store.
+- `useEquity(): (req: { hole: Card[]; board: Card[]; opponents: number }) => void`, which writes `myEquity` to the store.
+- I-5 `TableManager` adds `setConnected(gameId, userId, connected)`, `pendingSeatRequests(gameId)` and `results(gameId)`. `TableView` adds `seatRequests: { playerId, name }[]` (host only, else []) and `chat` (TableManager reads the last 50 rows from `chat_messages`).
+- S2's `types.d.ts` also augments `FastifyInstance` with `tables: TableManager` (a type-only import).
+
+**F11 (should-fix) There is no production path.**
+- S0.1 adds root `build` (`vite build` for web) and `start` (`node --import tsx apps/server/src/main.ts`) scripts.
+- S12's `main.ts` serves `apps/web/dist` with @fastify/static, with an SPA fallback to `index.html` for non-`/api` GET requests, when `NODE_ENV=production`.
+- S2 sets the CSP (`default-src 'self'; img-src 'self' blob: data:; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'`) on all responses.
+- D1 documents `npm run build && NODE_ENV=production npm start`.
+
+**F12 (nit) pgcrypto is unnecessary.**
+- Drop `create extension pgcrypto` from I-4 and from the DB setup commands, because `gen_random_uuid()` is built into PG16.
+- `testDb` sets `search_path to t_<id>, public`.
+
+**F13 (should-fix) Money and legal risk.** The user decided: play-money dollars only, with no conversion (see "Decisions"). W15 and W1 show the "play money" label. D1's README says the app has no real-money features.
+
+**F14 (should-fix) Session ids are unspecified.**
+- The cookie value is 32 CSPRNG bytes (base64url).
+- `sessions.id` stores `sha256(value)` as hex.
+- A new session is made at every login, and the old cookie's session is deleted.
+- Logout deletes the session.
+- S2 tests that the stored id differs from the cookie value.
+
+**F15 (should-fix) CSRF and headers.**
+- S2's `onRequest` hook also rejects state-changing requests that have `Sec-Fetch-Site: cross-site`, and requests that have neither `Origin` nor `Sec-Fetch-Site` but carry a cookie (non-browser callers use no cookie anyway).
+- S4 sets `x-content-type-options: nosniff`, the CSP `default-src 'none'; img-src 'self'; sandbox` and `content-disposition: inline` on `/avatars/*`.
+
+**F16 (nit) Open registration invites sybil chip farming.**
+- Registration needs an invite code. Config `REGISTRATION=open|invite` defaults to `invite`; e2e and dev use `open`.
+- Any user can create invite codes (`POST /api/invites` in `routes/auth.ts`, owned by S3; table `invite_codes (code text primary key, created_by uuid references users, used_by uuid, created_at timestamptz default now())` in `migrations/003_invites.sql`, owned by S3).
+- The signup grant stays at $10,000. The README notes the chip-dumping risk.
+
+**F17 (blocker) The checkpoint 3 check cannot pass.**
+- S2 also owns `apps/server/src/main.ts` in checkpoint 3 (boot: migrate, `buildApp`, listen). S12 takes ownership of it in checkpoint 5.
+- S0.1 defines server scripts: `dev` = `tsx watch src/main.ts`, `start`, `db:migrate` = `tsx src/db/migrate.ts`, `seed`.
+- New checkpoint 3 check: `npx vitest run apps/server && npm run db:migrate -w @poker/server && (npm run dev -w @poker/server & echo $! > /tmp/pk.pid; for i in $(seq 1 20); do curl -sf localhost:3001/api/health && break; sleep 1; done; kill $(cat /tmp/pk.pid))`.
+
+**F18 (should-fix) E2E specs share state.**
+- `playwright.config.ts` uses `workers: 1` and `fullyParallel: false`.
+- Every spec makes unique emails (`ana+${Date.now()}@test.local`).
+- `history.spec.ts` plays its own hand in `beforeAll` instead of relying on `table.spec.ts`.
+
+**F19 (should-fix) S13 is too slow for vitest.**
+- `TableManager` deps add `seedWaitMs` (default 2000) and `runoutPacingMs` (default 1500). S13 sets 50 and 0.
+- The idle-bot check is a separate test of 2 hands with `turnSeconds: 1` (protocol min becomes 1 in tests only: allow `turnSeconds >= 1` when `NODE_ENV=test`, else 5).
+- Each test sets an explicit `{ timeout: 60_000 }`.
+
+**F20 (should-fix) The AC16 mutation targets code that cannot exist.**
+- `ledger.transfer` locks the account rows with `select id from ledger_accounts where id = any($1) order by id for update`, then sums.
+- The AC16 test uses a barrier: two clients each `begin`, transfer, then wait on a shared promise before `commit`, so the race is forced deterministically.
+- The mutation is to delete the `for update` from that row-lock query; the barrier test then fails because both commit and the balance goes negative.
+
+**F21 (should-fix) The AC7 mutations would not fail their tests.**
+- E2 adds known-answer tests:
+  - `commit('abc') === 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'`
+  - a fixed `deckFromSeeds('00'.repeat(32), ['11'.repeat(16)], 1)` vector, whose first 5 cards are recorded by E2 at implementation time and then frozen in the test
+- E2 splits out `uniformInt(n, nextU32)` and tests it with a stubbed stream: for n = 3, the value `0xFFFFFFFF` must be rejected.
+- AC7 mutations:
+  1. `commit` hashes `serverSeed + 'x'`, so the known-answer test fails.
+  2. `uniformInt` drops the rejection loop, so the stub test fails.
+
+**F22 (nit) The AC13 mutation fails for the wrong reason.** The mutation is now `author = $1` → `(author = $1 or true)`.
+
+**F23 (nit) Playwright `webServer` and the database at checkpoint 0.**
+- `webServer` is an array: server (`url: http://localhost:3001/api/health`) and web (`url: http://localhost:5173`), each with `timeout: 120_000`.
+- At checkpoint 0 the server has no database, so S0.1's server `main.ts` serves `/api/health` without connecting to the database. The lead runs the "Database" setup before checkpoint 0 instead of checkpoint 3.
+
+**F24 (nit) Pins.**
+- Pin `jsdom@31.0.1`; it needs Node ^22.22.2, and 22.23.5 satisfies that.
+- All other pins checked out.
+
 
 ---
 
