@@ -253,6 +253,10 @@ export function analyse(records: HandRecord[], bigBlind: Chips): IntegrityFlag[]
 export function sharedNetwork(sessions: { playerId: string; ip: string; deviceId: string }[]): IntegrityFlag[];
 ```
 
+**I-2 amendments (lead, checkpoint 2, written before the build):**
+- `hand.ts` adds `advance(state): { state; events }`. During an all-in runout it deals the next street, and after the river it finishes the hand. S8 needs it to pace runout streets and emit `equity` between them; without it the engine would deal the whole board in one step. In a runout `toAct` is null and `isComplete` is false until the last `advance`.
+- `equity.ts`: `equityExact` takes an optional third parameter `rand`, and the file exports `mulberry32(seed)` for seeded tests and the fixed-seed preflop default.
+
 `packages/engine/src/index.ts` (written by S0.1) re-exports every module above with `export * from './x.js'`. Stub files are created by S0.1 and each throw `new Error('not implemented')`, so imports compile from the start.
 
 #### I-3 Socket protocol: `poker/packages/protocol/src/index.ts` (P1)
@@ -867,4 +871,22 @@ Review run 2026-11-24 by a fresh sub-agent (checked versions with `npm view` and
   - settlement: `formatPlayMoney` throws on a non-safe-integer; with no transfers `settlementText` starts "Everyone is even."
   - protocol: `PartialGameSettingsSchema` carries no defaults, so `updateSettings` never resets omitted fields. Also exported: `ClientEventSchemas`, `ServerEventSchemas`, `GameSettingsInput`, `MIN_TURN_SECONDS`, and payload types `HostCommandMessage`, `TableStatusMessage`, `HandEventMessage`, `ErrorMessage`, `Notify`. `SeatView.avatarUrl` is `string | null`. Client payloads and `GameSettings` reject unknown keys. Compile-time checks tie the zod schemas to the engine types.
 
-Next: checkpoint 2.
+### Checkpoint 2: Engine game flow, 2026-11-24 (passed)
+- Lead: Fable 5.2. All 4 sub-agents ran on Opus.
+- Check, run by the lead: `npm run lint` exit 0, `npm run typecheck` exit 0, `npx vitest run --project engine --project protocol`: 12 files, 239 tests passed (hand 39, sim 1 covering 2,200 simulated hands, equity 15, collusion 17, stats 10, plus checkpoint 1's 157).
+- The lead read `hand.ts`, `collusion.ts` and `stats.ts` in full and the top of `equity.ts`, and checked each deviation below against the rules.
+- Mutation checks:
+  - AC6 `hand.ts`, min-raise increment set to the big blind: 6 hand tests failed (min-raise sizing and the short all-in cases). Reversed with the reverse Edit.
+  - AC9 `collusion.ts`, strong-fold threshold 3 → 300: 2 tests failed. Reversed with the reverse `sed`; sha256 matched the original.
+- Plan amendments (written before the build, see "I-2 amendments"): `advance(state)` in `hand.ts`; `equityExact(holes, board, rand?)` and `mulberry32` in `equity.ts`.
+- Deviations accepted:
+  - hand, big-blind ante: it is kept out of the side-pot layering and added to the main pot. Layering it would hand the ante back to the big blind as a side pot only they can win.
+  - hand, several short all-ins: they reopen raising once together they raise the bet by a full min-raise over what the player last acted on (TDA cumulative rule).
+  - hand, facing only all-in players: the player only has to match the largest all-in and can only call or fold.
+  - hand, uncalled chips: the top street contribution above the second highest is returned, counting folded players.
+  - hand: `canFold` is always true; `call` with nothing to call throws; `action.amount` is the street total after the action for every kind; `handEnded.stacks` and `potAwarded.seats` are in ascending seat order; `HandState` fields are public.
+  - equity: accepts 1 to 9 hands; exports `Equity`.
+  - collusion: a pair that qualifies in both directions gives two `chipDumping` flags with the same sorted `players`. **S8 must merge them before the upsert**, because `integrity_flags` is unique on (game, kind, players): keep the higher score and join the summaries. `sharedNetwork` flags have no evidence hands.
+  - stats: the highest preflop contribution starts at the largest blind posted; a hand with no end stack for the player adds 0 to `netChips`.
+
+Next: checkpoint 3.
