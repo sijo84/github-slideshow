@@ -1,0 +1,36 @@
+{
+  "name": "poker",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22.22.2"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "e2e": "playwright test --trace off",
+    "dev": "run-p dev:server dev:web",
+    "dev:server": "npm run dev -w @poker/server",
+    "dev:web": "npm run dev -w @poker/web",
+    "db:migrate": "npm run db:migrate -w @poker/server",
+    "build": "npm run build -w @poker/web",
+    "start": "node --import tsx apps/server/src/main.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.20.5",
+    "eslint": "10.15.0",
+    "fast-check": "4.11.0",
+    "globals": "17.14.0",
+    "npm-run-all2": "9.1.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.74.0",
+    "vitest": "5.1.1"
+  }
+}

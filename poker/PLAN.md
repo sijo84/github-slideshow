@@ -825,3 +825,19 @@ Review run 2026-11-24 by a fresh sub-agent (checked versions with `npm view` and
 ## Progress
 
 (Empty at the start. The lead records each checkpoint here.)
+
+### Checkpoint 0: Scaffold, 2026-11-24 (passed)
+- Lead: Opus 5.5. The user's Fable-lead rule arrived during this checkpoint. Sub-agents ran on Opus, inherited.
+- Database setup is done (F23): role `poker`; databases `poker_dev`, `poker_test`, `poker_e2e`. No pgcrypto (F12).
+- S0.2: `_config.yml` excludes `poker` and the Ruby YAML check prints `true`. Committed separately and early, because a stop hook required committing pending changes.
+- S0.1: the lead ran the check itself from `poker/`: `npm ci && npm run lint && npm run typecheck && npx vitest run --passWithNoTests && npm run e2e`. Exit 0, and the Playwright smoke test passed (1 passed). The lead checked `packages/engine/src/types.ts` against I-1 with `diff` (identical) and confirmed that the engine stubs throw, that `.gitignore` covers `node_modules`, `dist`, `data` and the test output, that the pins are TS 6.0.3, @playwright/test 1.63.0, @types/node 22.20.5 and jsdom 31.0.1, and that all page stubs are present, including Results.tsx.
+- Deviations accepted:
+  - `config.ts` adds `HOST` (default `localhost`) and exports `loadConfig(env)`/`Config`.
+  - The engine stubs carry `eslint-disable no-unused-vars` headers. Each owning task deletes them when it replaces its file.
+  - `dealPositions` is already stubbed in `hand.ts`.
+  - The vitest server project sets `NODE_ENV=test`.
+  - The root `dev` script uses `run-p`.
+  - Extra pins: @eslint/js 10.0.1, globals 17.14.0, npm-run-all2 9.1.0, @types/luxon 3.7.6, @testing-library/react 16.3.3, @testing-library/user-event 14.6.13, @testing-library/jest-dom 8.0.0.
+- Mutation checks: none. This checkpoint has no acceptance-criterion tests.
+
+Next: checkpoint 1. Start a fresh session on Fable. This session's context is past half.
