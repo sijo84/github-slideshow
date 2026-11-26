@@ -24,7 +24,7 @@ const GAME = '11111111-1111-4111-8111-111111111111';
 const PLAYER = '22222222-2222-4222-8222-222222222222';
 
 function msg(id: string, text: string, name = 'Ann'): ChatMessage {
-  return { gameId: GAME, id, playerId: PLAYER, name, text, at: '2026-11-26T12:00:00.000Z' };
+  return { gameId: GAME, id, playerId: PLAYER, name, text, at: 1_795_000_000_000 };
 }
 
 // Deterministic animation frames.

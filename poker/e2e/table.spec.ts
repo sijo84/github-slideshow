@@ -25,7 +25,7 @@ import {
 } from './helpers';
 
 const VERIFIED = '✓ Cards verified';
-const HAND_TIMEOUT = 60_000;
+const HAND_TIMEOUT = 45_000;
 
 const CALL_OR_CHECK = [/^Call \$/, /^Check$/];
 const CHECK_OR_CALL = [/^Check$/, /^Call \$/];
@@ -36,10 +36,12 @@ async function nextTurn(pages: Page[], done: () => Promise<boolean>, timeout = H
   await expect
     .poll(
       async () => {
-        const i = await pageWithTurn(pages);
-        if (i >= 0) result = i;
-        else if (await done()) result = -1;
-        else result = -2;
+        // The end is checked first, so a turn of the next hand is never taken for one of this hand.
+        if (await done()) result = -1;
+        else {
+          const i = await pageWithTurn(pages);
+          result = i >= 0 ? i : -2;
+        }
         return result;
       },
       { timeout, intervals: [100, 200, 250], message: 'nobody got a turn and the hand did not end' },
@@ -61,7 +63,7 @@ async function closeAll(players: Player[]): Promise<void> {
 }
 
 test('three players play a hand', async ({ browser }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(90_000);
   const stamp = Date.now() % 100_000;
   const [ana, ben, cleo] = await createPlayers(browser, [`Ana ${stamp}`, `Ben ${stamp}`, `Cleo ${stamp}`]);
   if (!ana || !ben || !cleo) throw new Error('createPlayers returned too few players');
@@ -182,7 +184,7 @@ test('three players play a hand', async ({ browser }) => {
     const { samples, dropped } = await readTrace(page);
     expect(dropped ?? 0, 'trace samples were dropped').toBe(0);
     const violations = checkTrace(samples);
-    expect(violations, `trace violations on ${seatOf.get(page)}:\n${formatViolations(violations)}`).toEqual([]);
+    expect(violations, `trace violations on seat ${seatOf.get(page)}'s page:\n${formatViolations(violations)}`).toEqual([]);
     const ids = [...traceSeries(samples)];
     for (const prefix of ['obj:card:', 'obj:chips:', 'obj:seat:']) {
       expect(ids.some((id) => id.startsWith(prefix)), `no ${prefix}* series in the trace`).toBe(true);
@@ -196,7 +198,7 @@ test('three players play a hand', async ({ browser }) => {
 });
 
 test('all-in preflop shows both equities', async ({ browser }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(90_000);
   const stamp = Date.now() % 100_000;
   const [ana, ben] = await createPlayers(browser, [`Ana ${stamp}`, `Ben ${stamp}`]);
   if (!ana || !ben) throw new Error('createPlayers returned too few players');
