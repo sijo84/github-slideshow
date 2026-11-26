@@ -191,3 +191,79 @@ describe('useTweenedPosition', () => {
     expect(tw.__animTrace!.some((s) => s.id === 'obj:hud')).toBe(false);
   });
 });
+
+function Spawn({ id, target, from, delayMs }: { id: string; target: Vec3; from?: Vec3; delayMs?: number }) {
+  const p = useTweenedPosition(id, target, { durationMs: 300, from, delayMs });
+  return <span data-testid="s">{p.join(',')}</span>;
+}
+
+describe('useTweenedPosition from / delayMs (I-11)', () => {
+  it('mounting with `from` starts at `from`, tweens to `target`, every change in obj: active', () => {
+    tw.__POKER_TRACE__ = true;
+    const { getByTestId } = render(
+      <StrictMode>
+        <Spawn id="card:x" from={[0, 0, 0]} target={[3, 0, 4]} />
+      </StrictMode>,
+    );
+    expect(getByTestId('s').textContent).toBe('0,0,0');
+    expect(activeTweenCount()).toBe(1);
+    frames(25);
+    expect(getByTestId('s').textContent).toBe('3,0,4');
+    expect(activeTweenCount()).toBe(0);
+    const obj = tw.__animTrace!.filter((s) => s.id === 'obj:card:x');
+    expect(obj.length).toBe(25);
+    expect(obj.at(-1)!.value).toEqual([3, 0, 4]);
+    let changes = 0;
+    let prev: Vec3 = [0, 0, 0];
+    for (const s of obj) {
+      const v = s.value as Vec3;
+      if (v[0] !== prev[0] || v[1] !== prev[1] || v[2] !== prev[2]) {
+        changes++;
+        expect(s.active).toBe(true);
+        expect(s.tween).toBe('pos:card:x');
+        expect(s.from).toEqual([0, 0, 0]);
+        expect(s.to).toEqual([3, 0, 4]);
+      }
+      prev = v;
+    }
+    expect(changes).toBeGreaterThan(5);
+  });
+
+  it('delayMs holds the start value for that long, then moves', () => {
+    tw.__POKER_TRACE__ = true;
+    const { getByTestId } = render(<Spawn id="chip" from={[1, 1, 1]} target={[2, 1, 1]} delayMs={200} />);
+    frames(11); // 183.7 ms < 200
+    expect(getByTestId('s').textContent).toBe('1,1,1');
+    const held = tw.__animTrace!.filter((s) => s.id === 'obj:chip');
+    expect(held).toHaveLength(11);
+    expect(held.every((s) => (s.value as Vec3)[0] === 1)).toBe(true);
+    frames(2); // 217.1 ms: past the delay
+    expect(Number(getByTestId('s').textContent!.split(',')[0])).toBeGreaterThan(1);
+    frames(30);
+    expect(getByTestId('s').textContent).toBe('2,1,1');
+  });
+
+  it('delayMs also applies to retargets', () => {
+    let set: (v: Vec3) => void = () => {};
+    function Retarget() {
+      const [t, s] = useState<Vec3>([0, 0, 0]);
+      set = s;
+      const p = useTweenedPosition('r', t, { durationMs: 100, delayMs: 100 });
+      return <span data-testid="r">{p.join(',')}</span>;
+    }
+    const { getByTestId } = render(<Retarget />);
+    act(() => set([1, 0, 0]));
+    frames(5); // 83.5 ms
+    expect(getByTestId('r').textContent).toBe('0,0,0');
+    frames(10);
+    expect(getByTestId('r').textContent).toBe('1,0,0');
+  });
+
+  it('without `from` the first render equals target and nothing tweens', () => {
+    const { getByTestId } = render(<Spawn id="plain" target={[5, 0, 5]} delayMs={100} />);
+    expect(getByTestId('s').textContent).toBe('5,0,5');
+    expect(activeTweenCount()).toBe(0);
+    frames(10);
+    expect(getByTestId('s').textContent).toBe('5,0,5');
+  });
+});

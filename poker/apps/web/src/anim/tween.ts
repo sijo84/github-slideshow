@@ -394,19 +394,23 @@ function valueKey(v: TweenValue): string {
   return typeof v === 'number' ? String(v) : `${v[0]},${v[1]},${v[2]}`;
 }
 
-interface TweenStateOpts {
+interface TweenStateOpts<T extends TweenValue> {
   durationMs: number;
   ease?: Ease;
+  /** Passed to every tween the hook starts. */
+  delayMs?: number;
+  /** Value on the first render (a spawn); the hook then tweens to `target` at once. Read on mount only. */
+  from?: T;
 }
 
 /** Shared core: state that eases to `target`; restarts only when the target value or tween id changes. */
 function useTweenState<T extends TweenValue>(
   tweenId: string,
   target: T,
-  opts: TweenStateOpts,
+  opts: TweenStateOpts<T>,
 ): [T, { current: T }] {
-  const [value, setValue] = useState<T>(target);
-  const valueRef = useRef<T>(target);
+  const [value, setValue] = useState<T>(() => opts.from ?? target);
+  const valueRef = useRef<T>(value);
   const optsRef = useRef(opts);
   optsRef.current = opts;
   const targetRef = useRef(target);
@@ -423,6 +427,7 @@ function useTweenState<T extends TweenValue>(
       to,
       durationMs: optsRef.current.durationMs,
       ease: optsRef.current.ease,
+      delayMs: optsRef.current.delayMs,
       onUpdate: (v) => {
         if (!alive) return;
         valueRef.current = v;
@@ -453,16 +458,21 @@ export const DEFAULT_POSITION_MS = 350;
 
 /** F5: like useTween for a position, and it also records the value it returns every frame under `obj:<id>`
  *  in the trace, moving or not. The only way table objects and panels get a position. The underlying tween
- *  id is `pos:<id>`. */
+ *  id is `pos:<id>`.
+ *  - `from` (I-11): the value on the first render; the hook then tweens to `target` at once (a spawn).
+ *    Without it the first render equals `target`. Only read on mount.
+ *  - `delayMs` (I-11): passed to every tween the hook starts; during the delay the value holds still. */
 export function useTweenedPosition(
   id: string,
   target: Vec3,
-  opts?: { durationMs?: number; ease?: Ease },
+  opts?: { durationMs?: number; ease?: Ease; delayMs?: number; from?: Vec3 },
 ): Vec3 {
   const tweenId = `pos:${id}`;
   const [value, valueRef] = useTweenState<Vec3>(tweenId, target, {
     durationMs: opts?.durationMs ?? DEFAULT_POSITION_MS,
     ease: opts?.ease,
+    delayMs: opts?.delayMs,
+    from: opts?.from,
   });
 
   useEffect(() => {
