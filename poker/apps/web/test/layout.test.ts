@@ -12,6 +12,7 @@ import {
   makeScene,
   muckPosition,
   potPosition,
+  hudSizeFor,
   seatPosition,
 } from '../src/table/layout.js';
 import { cardPlacePosition } from '../src/table/sceneContext.js';
@@ -55,6 +56,8 @@ describe('seatPosition', () => {
     }
   });
 
+  // Bets are not mirrored: their amount labels are drawn to the right of the stack, so right-hand seats need
+  // their bets placed differently to keep the label off the seat's HUD (see the HUD test below).
   it('is left/right symmetric', () => {
     for (const n of SEAT_COUNTS) {
       for (const me of viewers(n)) {
@@ -64,10 +67,6 @@ describe('seatPosition', () => {
           const b = seatPosition((v + n - k) % n, n, me);
           expect(close(a[0], -b[0])).toBe(true);
           expect(close(a[2], b[2])).toBe(true);
-          const ba = betPosition((v + k) % n, n, me);
-          const bb = betPosition((v + n - k) % n, n, me);
-          expect(close(ba[0], -bb[0])).toBe(true);
-          expect(close(ba[2], bb[2])).toBe(true);
         }
       }
     }
@@ -231,4 +230,43 @@ describe('cameraFor', () => {
       expect(fill).toBeGreaterThan(0.85);
     });
   }
+
+  it('keeps every bet stack, its amount label and the dealer button clear of the seat’s HUD (desktop stage)', () => {
+    // The desktop stage at 1280×800 is 912×513 CSS px. The camera frames for empty-seat HUDs (hudSizeFor), an
+    // occupied HUD is up to ~127×146 px centred on the seat; a bet label is up to ~60×22 px, left edge just
+    // right of the stacks (Chips.tsx: stacks up to ~0.28 wide either side, label anchored 0.05 past them).
+    const W = 912;
+    const H = 513;
+    const HUD_W = 127;
+    const HUD_H = 146;
+    const project = projector(W, H, { width: W, height: H, ...hudSizeFor(1280) });
+    type Box = { l: number; r: number; t: number; b: number };
+    const box = (c: Vec3, hx: number, hz: number, hy: number): Box => {
+      const ps: { x: number; y: number }[] = [];
+      for (const dx of [-hx, hx]) for (const dz of [-hz, hz]) for (const dy of [0, hy]) ps.push(project([c[0] + dx, c[1] + dy, c[2] + dz]));
+      return {
+        l: Math.min(...ps.map((p) => p.x)),
+        r: Math.max(...ps.map((p) => p.x)),
+        t: Math.min(...ps.map((p) => p.y)),
+        b: Math.max(...ps.map((p) => p.y)),
+      };
+    };
+    const overlaps = (a: Box, b: Box): boolean => a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t;
+    const problems: string[] = [];
+    for (const n of SEAT_COUNTS)
+      for (const me of viewers(n))
+        for (let s = 0; s < n; s++) {
+          const seat = project(seatPosition(s, n, me));
+          const hud: Box = { l: seat.x - HUD_W / 2, r: seat.x + HUD_W / 2, t: seat.y - HUD_H / 2, b: seat.y + HUD_H / 2 };
+          const bet = betPosition(s, n, me);
+          const label = project([bet[0] + 0.33, 0.03, bet[2]]);
+          const parts: [string, Box][] = [
+            ['chips', box(bet, 0.28, 0.13, 0.12)],
+            ['label', { l: label.x, r: label.x + 60, t: label.y - 11, b: label.y + 11 }],
+            ['button', box(buttonPosition(s, n, me), 0.15, 0.15, 0.05)],
+          ];
+          for (const [name, b] of parts) if (overlaps(b, hud)) problems.push(`n=${n} me=${me} seat ${s}: ${name} under its HUD`);
+        }
+    expect(problems).toEqual([]);
+  });
 });

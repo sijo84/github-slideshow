@@ -414,14 +414,35 @@ function fmtValue(v: TraceValue): string {
   return typeof v === 'number' ? v.toFixed(3) : `[${v.map((x) => x.toFixed(3)).join(', ')}]`;
 }
 
-/** A readable list of the first `max` violations, for assertion messages. */
-export function formatViolations(violations: TraceViolation[], max = 15): string {
+function fmtSample(s: TraceSample): string {
+  const tween = s.active ? ` ${s.tween ?? ''} ${s.ease ?? ''} ${s.from !== undefined ? fmtValue(s.from) : '-'}→${s.to !== undefined ? fmtValue(s.to) : '-'} ${s.durationMs ?? '-'}ms` : '';
+  return `    t=${s.t.toFixed(1)} ${fmtValue(s.value)} active=${s.active ?? '-'}${tween}`;
+}
+
+/**
+ * A readable list of the first `max` violations, for assertion messages. With `samples`, the first violation
+ * also gets the samples of its series around it, and those of the matching `pos:` tween series in that window.
+ */
+export function formatViolations(violations: TraceViolation[], max = 15, samples?: TraceSample[]): string {
   const lines = violations.slice(0, max).map(
     (v) =>
       `${v.series} #${v.index} t=${v.t.toFixed(1)} Δt=${v.dtMs.toFixed(1)}ms: ${v.reason}; |Δ|=${v.delta.toFixed(4)} bound=${v.bound.toFixed(4)} ` +
       `${fmtValue(v.prev)} → ${fmtValue(v.value)} (tween=${v.tween ?? '-'}, ease=${v.ease ?? '-'}, durationMs=${v.durationMs ?? '-'})`,
   );
   if (violations.length > max) lines.push(`… and ${violations.length - max} more`);
+  const first = violations[0];
+  if (samples && first) {
+    const series = samples.filter((s) => s.id === first.series);
+    lines.push(`  context of ${first.series} (${series.length} samples, first at t=${series[0]?.t.toFixed(1)}):`);
+    for (const s of series.slice(Math.max(0, first.index - 4), first.index + 3)) lines.push(fmtSample(s));
+    if (first.series.startsWith('obj:')) {
+      const tweenId = `pos:${first.series.slice('obj:'.length)}`;
+      const lo = series[Math.max(0, first.index - 4)]?.t ?? first.t;
+      const near = samples.filter((s) => s.id === tweenId && s.t >= lo - 1000 && s.t <= first.t + 1000);
+      lines.push(`  ${tweenId} samples within 1 s: ${near.length}`);
+      for (const s of near.slice(0, 8)) lines.push(fmtSample(s));
+    }
+  }
   return lines.join('\n');
 }
 

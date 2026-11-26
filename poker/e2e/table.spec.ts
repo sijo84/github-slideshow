@@ -181,19 +181,23 @@ test('three players play a hand', async ({ browser }) => {
   }
 
   // (e) the animation trace: every change was a tween within its curve's bound, and the expected series exist.
-  for (const page of pages) {
+  const traceProblems: string[] = [];
+  for (const player of players) {
+    const page = player.page;
     const { samples, dropped } = await readTrace(page);
-    expect(dropped ?? 0, 'trace samples were dropped').toBe(0);
+    if ((dropped ?? 0) !== 0) traceProblems.push(`${player.name}: ${dropped} trace samples were dropped`);
     const violations = checkTrace(samples);
-    expect(violations, `trace violations on seat ${seatOf.get(page)}'s page:\n${formatViolations(violations)}`).toEqual([]);
-    const ids = [...traceSeries(samples)];
-    for (const prefix of ['obj:card:', 'obj:chips:', 'obj:seat:']) {
-      expect(ids.some((id) => id.startsWith(prefix)), `no ${prefix}* series in the trace`).toBe(true);
+    if (violations.length > 0) {
+      traceProblems.push(`${player.name}: ${violations.length} trace violations\n${formatViolations(violations, 15, samples)}`);
     }
-    if (page === ana.page) {
-      expect(ids.includes('obj:panel:host'), 'no obj:panel:host series in the host trace').toBe(true);
+    const ids = [...traceSeries(samples)];
+    const wanted = ['obj:card:', 'obj:chips:', 'obj:seat:'];
+    if (page === ana.page) wanted.push('obj:panel:host');
+    for (const prefix of wanted) {
+      if (!ids.some((id) => id.startsWith(prefix))) traceProblems.push(`${player.name}: no ${prefix}* series in the trace`);
     }
   }
+  expect(traceProblems, traceProblems.join('\n\n')).toEqual([]);
 
   await closeAll(players);
 });
