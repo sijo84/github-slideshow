@@ -170,7 +170,9 @@ test('three players play a hand', async ({ browser }) => {
   for (const page of pages) await expect(handLog(page)).toContainText(VERIFIED);
   // The board reached the river.
   expect(sawRiver, 'the board never showed 5 cards while a decision was pending').toBe(true);
-  expect(actions).toBe(9);
+  // Three players, checked down: 3 preflop actions (two calls, the big blind's check) + 3 checks on each of
+  // flop, turn and river = 12.
+  expect(actions).toBe(12);
 
   // (f) the chips on display add up to the 3,000 bought in (stacks, plus bets and pots in case the next hand
   // has already posted its blinds; the stack labels count with a tween, hence the poll).
