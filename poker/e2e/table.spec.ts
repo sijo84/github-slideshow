@@ -88,7 +88,8 @@ test('three players play a hand', async ({ browser }) => {
   const panel = ana.page.getByTestId('host-panel');
   await ana.page.getByRole('button', { name: 'Host panel', exact: true }).click();
   await expect(panel).toHaveAttribute('data-open', 'true');
-  await ana.page.getByRole('button', { name: 'Host panel', exact: true }).click();
+  // The open slide-over covers the "Host panel" toggle (intended), so it is closed with its own button.
+  await panel.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(panel).toHaveAttribute('data-open', 'false');
 
   // Everyone sits with 1,000.
