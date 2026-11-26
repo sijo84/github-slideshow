@@ -99,7 +99,7 @@ describe('chipStacks', () => {
       fc.property(fc.integer({ min: 0, max: 20_000_000 }), fc.integer({ min: 1, max: 200_000 }), (amount, bb) => {
         checkShape(amount, bb);
       }),
-      { numRuns: 1_500 },
+      { numRuns: 3_000 },
     );
   });
 
@@ -112,8 +112,17 @@ describe('chipStacks', () => {
         const amount = parts.reduce((s, p) => s + p.d * p.c, 0);
         expect(stacksTotal(chipStacks(amount, bb))).toBe(amount);
       }),
-      { numRuns: 1_500 },
+      { numRuns: 3_000 },
     );
+  });
+
+  it('finds exact pictures that need a denomination split over two stacks (regression)', () => {
+    // fast-check seed 1246053963: 2×100k + 6×25k + 11×500 (two stacks) + 2×25 + 8×1 = 355,558 in 6 stacks.
+    // The search used to give up on a denomination too early: it never tried a lower count that frees a stack.
+    const stacks = chipStacks(355_558, 1);
+    expect(stacksTotal(stacks)).toBe(355_558);
+    expect(stacks.length).toBeLessThanOrEqual(MAX_STACKS);
+    expect(stacksTotal(chipStacks(355_558, 2))).toBe(355_558);
   });
 
   it('shows a nearby amount when no exact picture fits', () => {

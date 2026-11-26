@@ -77,7 +77,10 @@ function exact(denoms: readonly number[], amount: number): number[] | null {
     for (let c = hi; c >= 0; c--) {
       const left = stacksLeft - stacksFor(c);
       const r = rest - c * d;
-      if (r > capFrom(i + 1, left)) break; // fewer chips here only leaves more for smaller ones
+      // Fewer chips here leaves more for the smaller denominations, but can also free a stack, so only stop
+      // once even all remaining stacks could not hold the rest; otherwise skip just this count.
+      if (r > capFrom(i + 1, stacksLeft)) break;
+      if (r > capFrom(i + 1, left)) continue;
       counts[i] = c;
       if (go(i + 1, left, r)) return true;
     }
@@ -120,7 +123,7 @@ function closest(denoms: readonly number[], amount: number): number[] {
     for (let c = hi; c >= 0; c--) {
       counts[i] = c;
       go(i + 1, stacksLeft - stacksFor(c), rest - c * d);
-      if (rest - c * d > capFrom(i + 1, stacksLeft - stacksFor(c)) + bestDiff) break;
+      if (rest - c * d > capFrom(i + 1, stacksLeft) + bestDiff) break; // same reasoning as in exact()
     }
     counts[i] = 0;
   };
