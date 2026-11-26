@@ -533,6 +533,91 @@ W2 may add to this surface and reports what it added; it does not remove or rena
 
 **E2E server setup (W-E2E-1).** Playwright starts `webServer` before `globalSetup`, and the server migrates at boot, so a schema drop in `globalSetup` would pull the tables from under a running server. Instead: `e2e/reset-db.ts` (run with `tsx`) does `drop schema public cascade; create schema public;` on `poker_e2e` as the `poker` role (no pgcrypto, F12), and the server `webServer.command` becomes `npx tsx e2e/reset-db.ts && npm run dev -w @poker/server`. Its env adds `REGISTRATION=open`, `RATE_LIMIT_MAX=100000`, `AUTH_RATE_LIMIT_MAX=100000`. `e2e/global-setup.ts` stays a no-op.
 
+#### I-11 The table in detail (lead, checkpoint 8, written before the build; overrides the W5–W12 and W-E2E-2 task text, I-6 and F10 where they differ)
+
+**Two phases.** Checkpoint 8 starts with one task, **W0 Table contracts**, alone. When it has passed, W5–W12 and W-E2E-2 run in parallel. W0 exists so that every parallel task imports files that are already final and nobody waits on a file another task is still writing.
+
+**The model: a paced, declarative scene.** Components never play animations imperatively. The store holds *where every card and chip stack is* (`cards`, `chips`) and the numbers on display. Each component takes its position from `useTweenedPosition(id, scene.xxxPosition(...), { from, delayMs, durationMs, ease })`, so every change of place is a tween by construction (AC4, F5). Hand events enter a queue as **steps**. One driver, the *director* (W11), plays the queue in order: `begin(id)` moves the entities (the tweens start), then after the step's duration `consume(id)` settles the numbers (stacks, bets, pots, whose turn) and removes entities that are gone. This replaces I-6's "components play steps and call consume": only the director calls `begin`/`consume`.
+
+**W0 Table contracts.** Owns: `apps/web/src/table/types.ts`, `apps/web/src/table/storeContext.tsx`, `apps/web/src/table/sceneContext.ts`, edits to `apps/web/src/anim/tween.ts` + `apps/web/test/useTween.test.tsx`, `apps/web/test/storeContext.test.tsx`, and a stub of every checkpoint-8 component file so imports compile: `table/{Table3D,Felt,Cards,Chips,SeatHud,TurnRing,ActionBar,ChatPanel,NotesPopover}.tsx`, `table/{layout,cardTexture,chipStacks,useTableStore,verify}.ts`, `workers/{equity.worker,useEquity}.ts` (each stub exports the names and prop types below; components return `null`, functions throw `new Error('not implemented')`). Proof: `npx vitest run apps/web/test/useTween.test.tsx apps/web/test/storeContext.test.tsx && npm run typecheck && npm run lint`.
+
+1. `tween.ts`: `useTweenedPosition(id, target, opts?: { durationMs?; ease?; delayMs?; from?: Vec3 })`. `from`: the value on the first render; the hook then tweens to `target` at once (a spawn). Without `from` the first render equals `target` as now. `delayMs` is passed to every tween the hook starts. Tests: mounting with `from` starts at `from` and ends at `target` with every traced `obj:` sample in between `active: true`; `delayMs` holds the value at the start for that long.
+2. `table/types.ts` (final, verbatim apart from imports):
+```ts
+export type CardPlace = { at: 'deck' } | { at: 'seat'; seat: SeatIndex; index: 0 | 1 } | { at: 'board'; index: number } | { at: 'muck' };
+/** id: `card:<handId>:<seat>:<0|1>` for hole cards, `card:<handId>:board:<0..4>` for board cards. */
+export interface CardEntity { id: string; place: CardPlace; spawnFrom?: CardPlace; card: Card | null /* null = hidden from this viewer */; faceUp: boolean; order: number /* stagger index inside its step */; fading: boolean }
+export type ChipPlace = { at: 'seat'; seat: SeatIndex } | { at: 'bet'; seat: SeatIndex } | { at: 'pot'; index: number };
+/** ids: `chips:bet:<seat>` (a seat's bet this street), `chips:inc:<stepId>` (chips on their way to join a bet),
+ *  `chips:pot:<index>`, `chips:award:<stepId>:<seat>` (a pot share on its way to a winner), `chips:return:<stepId>`. */
+export interface ChipEntity { id: string; amount: Chips; place: ChipPlace; spawnFrom?: ChipPlace; order: number }
+export type StepKind = 'newHand' | 'bet' | 'deal' | 'turn' | 'action' | 'fold' | 'collect' | 'return' | 'pots' | 'board' | 'flip' | 'muck' | 'equity' | 'award' | 'handEnd';
+/** One queued unit of play. `events` are the hand events it covers (a step may batch several, e.g. all blinds, or every dealHole). */
+export interface AnimStep { id: number; kind: StepKind; events: HandEvent[]; seat?: SeatIndex; cards?: Card[]; amount?: Chips; potIndex?: number; durationMs: number }
+export interface Equity { win: number; tie: number }
+export interface LogLine { id: number; text: string; tone: 'info' | 'good' | 'bad' }
+export interface TableState {
+  gameId: string | null; settings: GameSettings | null; status: TableStatus; level: BlindLevel | null; nextLevelAt: number | null;
+  handId: string | null; handNumber: number; buttonSeat: SeatIndex | null;
+  seats: SeatView[];            // as DISPLAYED: stack/bet/folded/allIn/hasCards change on consume
+  board: Card[]; pots: Pot[];   // as displayed
+  toAct: SeatIndex | null; legal: LegalActions | null; deadline: number | null;
+  timeBank: { seat: SeatIndex; ms: number; using: boolean } | null;
+  mySeat: SeatIndex | null; myHole: Card[]; myEquity: Equity | null; allInEquity: Record<number, Equity> | null;
+  chat: ChatMessage[]; chatError: string | null; seatRequests: SeatRequest[]; results: ResultEntry[] | null;
+  commitment: string | null; handLog: LogLine[]; verified: 'pending' | 'ok' | 'failed' | null; lastError: string | null;
+  cards: CardEntity[]; chips: ChipEntity[];
+  queue: AnimStep[]; playing: AnimStep | null; animate: boolean; // animate false: steps are applied at once (replayer rebuild, tests)
+  // actions
+  applyView(view: TableView): void;           // full snapshot: replaces everything, clears the queue, entities appear in place
+  applyEvent(event: HandEvent): void;         // enqueues steps (cardProof is checked at once, never queued)
+  applySeats(seats: SeatView[]): void; applyClock(c: TableClock): void; applyStatus(s: TableStatusMessage): void;
+  applyCommitment(c: HandCommitment): void; applyResults(r: ResultEntry[]): void;
+  addChat(m: ChatMessage): void; setChatError(e: string | null): void; setError(e: string | null): void; setMyEquity(e: Equity | null): void;
+  begin(id: number): void; consume(id: number): void; flush(): void; reset(): void;
+}
+export function initialTableState(): Omit<TableState, /* the actions */ ...>;
+export const STEP_MS: Record<StepKind, number>; // base durations: newHand 350, bet 300, deal 380 (+90 per extra card, added by the store), turn 0, action 0, fold 300, collect 450, return 300, pots 0, board 380 (+90 per extra card), flip 300, muck 300, equity 0, award 600, handEnd 0
+export const DEAL_STAGGER_MS = 90;
+```
+3. `table/storeContext.tsx` (final): `TableStoreContext` (React context of a zustand `StoreApi<TableState>`), `TableStoreProvider({ store, children })`, `useTable<T>(selector: (s: TableState) => T): T` (zustand `useStore` on the context store; throws without a provider), `useTableStoreApi(): StoreApi<TableState>`, and `createBareTableStore(overrides?: Partial<TableState>): StoreApi<TableState>` (vanilla zustand store with `initialTableState()` and inert actions; component tests build their hand-made state with it, and W11 builds the real store on the same shape). **Every component reads the store only through `useTable`/`useTableStoreApi`**, never by importing `useTableStore`, so the replayer (checkpoint 9) can give the same components a different store.
+4. `table/sceneContext.ts` (final): `export interface Scene { maxSeats: number; mySeat: SeatIndex | null; seatPosition(seat): Vec3; betPosition(seat): Vec3; potPosition(index): Vec3; boardPosition(index): Vec3; buttonPosition(seat): Vec3; dealerPosition: Vec3; muckPosition: Vec3 }`, `SceneContext = createContext<Scene | null>(null)`, `useScene(): Scene` (throws outside a provider), and `cardPlacePosition(scene, place: CardPlace): Vec3` / `chipPlacePosition(scene, place: ChipPlace): Vec3` (deck → `dealerPosition`; a seat's two hole cards sit side by side, ±0.22 on x from `seatPosition` lifted toward the table centre; muck → `muckPosition`).
+
+**Exports and props the parallel tasks keep (W0 stubs them):**
+- W5 `layout.ts`: `seatPosition(seat, maxSeats, mySeat)`, `betPosition(seat, maxSeats, mySeat)`, `buttonPosition(seat, maxSeats, mySeat)`, `potPosition(index)`, `boardPosition(index)`, `dealerPosition`, `muckPosition`, `makeScene(maxSeats, mySeat): Scene`, `cameraFor(aspect): { position: Vec3; fov: number; lookAt: Vec3 }`. The table lies in the XZ plane, y is up. With `mySeat === null` seat 0 is at bottom centre. `Table3D.tsx`: `export function Table3D({ children, overlay }: { children?: ReactNode; overlay?: ReactNode })`: provides `SceneContext` from the store's `settings.maxSeats` and `mySeat`, renders the `<Canvas>` (children inside it) and, on top of it, `overlay` (plain DOM). The scene provider wraps both. The root element has `data-testid="table-3d"`.
+- W6 `Cards.tsx`: `export function Cards()` (inside the Canvas; renders `cards` from the store). W7 `Chips.tsx`: `export function Chips()` (inside the Canvas; renders `chips`; amount labels via drei `<Html>` with `data-testid="bet-<seat>"` on `chips:bet:<seat>` and `data-testid="pot-<index>"` on `chips:pot:<index>`, text in play dollars via `formatPlayMoney`). `chipStacks.ts`: `chipStacks(amount, bigBlind): { denom: number; color: string; count: number }[]`.
+- W8 `SeatHud.tsx`: `export function SeatHud({ seat }: { seat: SeatIndex })` (inside the Canvas: a group at `useTweenedPosition('seat:' + seat, scene.seatPosition(seat))` holding a drei `<Html center>` with the DOM part) and `export function SeatHudView({ seat })` (the DOM part alone; the unit test renders this, without a Canvas). Also `export function DealerButton()` (the "D" marker at `useTweenedPosition('button', scene.buttonPosition(buttonSeat))`). `TurnRing.tsx`: `export function TurnRing({ seat })`, rendered by `SeatHudView` for the active seat.
+- W9 `ActionBar.tsx`: `export function ActionBar({ gameId })` (plain DOM, in the overlay). W10 `ChatPanel.tsx`: `export function ChatPanel({ gameId })`; `NotesPopover.tsx`: `export function NotesPopover({ subjectId, name, onClose })`, `export function useNotes(): Record<string, { text: string; color: string | null }>` (one shared fetch of `GET /api/notes`, updated on save).
+- W11 `useTableStore.ts`: `createTableStore(): StoreApi<TableState>`, `tableStore` (the live singleton), `useTableStore` (zustand hook bound to it), `connectTable(gameId, store?): () => void` (joins, wires every socket event to the store actions, answers `hand:commitment` with a fresh client seed, uses `onRejoin`; returns a disconnect function), `useDirector(store?)` (the hook that plays the queue; mounted once by TablePage). `verify.ts`: `checkCardProof(commitments: string[], proof: { position; card; salt }): boolean`, `expectedPosition(...)` per F10, `verifyGame(fairness, hands): { handNumber; ok: boolean; problem?: string }[]`.
+- W12 `useEquity.ts`: `export function useEquity(): (req: { hole: Card[]; board: Card[]; opponents: number } | null) => void` (null clears; results go to `setMyEquity` of the context store). TablePage calls it from an effect whenever `myHole`, `board`, the number of opponents still in the hand, or my folded state change.
+
+**Step rules (W11).** Mapping, with what moves at `begin` and what settles at `consume`:
+- `handStarted` → `newHand`: begin sends every card of the previous hand to the muck (`fading`); consume removes them and all leftover chips, sets `handId`, `handNumber`, `buttonSeat`, clears `board`, `pots`, equities, sets `verified: 'pending'`.
+- consecutive `postAnte`/`postBlind` → one `bet` step: begin spawns `chips:inc:*` from each seat to its bet place; consume merges them into `chips:bet:<seat>` and updates `stack`/`bet`.
+- all `dealHole` events of a hand → one `deal` step: begin spawns the hole cards from the deck, `order` = deal order (F10: round by round, starting left of the button); my cards carry their values and `faceUp: true`. consume sets `hasCards`, `myHole`.
+- `toAct` → `turn` (sets `toAct`, `legal`, `deadline`). `action`: fold → `fold` (cards to the muck, then `folded`); check → `action` (log only); call/bet/raise/allIn → `bet`.
+- `uncalledReturned` → `return`. `potsFormed` → `collect` (begin moves every `chips:bet:*` to pot 0; consume removes them, sets `pots` and one `chips:pot:<i>` per pot, zeroes the bets). If there are no bet chips on the table the step takes 0 ms.
+- `street` → `board` (spawn from the deck, face up; flop staggered). `showCards` → `flip` (sets the card values, `faceUp`, and `cardsVisible`). `muck` → `muck`. `equity` → `equity` (sets `allInEquity`).
+- `potAwarded` → `award`: begin replaces `chips:pot:<i>` with one `chips:award:*` per winner, spawned at the pot, heading to the seat; consume removes them and raises the stacks.
+- `handEnded` → `handEnd`: sets the stacks from the event (the source of truth), clears `toAct`, writes "✓ Cards verified" (tone `good`) or a red warning to `handLog` according to the card proofs received this hand.
+- `toAct`, `legal`, `deadline`, `timeBank` are cleared when an `action` step for that seat begins. `table:clock` applies at once if its seat is the displayed `toAct`, else it is kept and applied when that `turn` step is consumed.
+- Catch-up: if more than 8 steps are waiting, the director plays at half duration; more than 20, at a quarter. With `animate: false` or `flush()`, every step is begun and consumed at once.
+- The director waits with a scalar `tween({ id: 'step:' + id, from: 0, to: 1, durationMs, ease: linear })`, so it shares the tween clock (fake rAF in tests, reduced motion, canvas frame loop).
+- `applyView` while steps are queued (a reconnect): the snapshot wins; the queue is dropped.
+
+**DOM facts the components and `e2e/table.spec.ts` agree on** (exact test ids and accessible names):
+- Seat (`SeatHudView`): root `data-testid="seat-<n>"` with `data-active="true|false"` and `data-me="true|false"`; avatar `<img alt="<name>">`; name; stack `data-testid="stack-<n>"` in play dollars (`$1,250`, counting with a tween); status chips with the texts "Folded", "All-in", "Away"; equity badge `data-testid="equity-<n>"` with text `Win 63%`; turn ring `data-testid="turn-ring"` (only on the active seat). Hole cards as text for tests and screen readers: my seat has `data-testid="my-hole"` containing one `<span data-card="As">` per card I hold; every other seat with cards has `data-testid="hole-<n>"` with `data-face="down"` and no `data-card` children until its cards are shown (then `data-face="up"` and the spans). These spans carry the class `sr-only`.
+- An empty seat (TablePage overlay or SeatHud, owned by **W8**: `SeatHud` renders it when no player sits there and the viewer is not seated): button with accessible name `Sit at seat <n+1>`. It calls `onSit(seat)` from a small context W0 defines in `sceneContext.ts`: `SeatActionsContext = createContext<{ onSit(seat): void; onOpenNotes(playerId, name): void }>`.
+- TablePage (W11): sit dialog `role="dialog"` named "Sit down" with a field labelled "Buy-in" and a button "Sit down" (a tournament shows the fixed starting stack). Buttons "Leave table", "Start game" (host, status waiting, at least 2 seated; sends host command `start`), "Host panel" (host only; toggles a slide-over that contains `<HostPanel gameId>`; the slide-over is positioned with `useTweenedPosition('panel:host', …)` and has `data-testid="host-panel"` with `data-open`). Board as text: `data-testid="board"` with one `<span data-card>` per board card on display (`sr-only`). Hand log `data-testid="hand-log"`. Status banner `data-testid="table-status"` ("Waiting for players", "Paused", "Level 3 · next level in 04:12", "Game over"). The page title area shows the "Play money" label (F13).
+- ActionBar (W9): root `data-testid="action-bar"` with `data-enabled="true|false"`. Buttons named exactly "Fold", "Check", `Call $<n>`, `Bet $<n>` or `Raise to $<n>` (the amount currently chosen; when the amount equals `maxTo` the name is `All-in $<n>`). Number field labelled "Amount"; presets "½ pot", "¾ pot", "Pot", "All-in" only set the amount. "Use time bank". Pre-action checkboxes "Check/Fold" and "Call any".
+- Chat (W10): field labelled "Message", button "Send", list `data-testid="chat-list"`, counter like `12/200`.
+
+**Trace check (W-E2E-2 (e), F5, with the checkpoint 7 decisions).** For every tween series and every `obj:*` series in `window.__animTrace`: for consecutive samples of one series, a change in value needs `active: true` on the later sample, and |Δ| ≤ 1.25 × `EASE_PEAK_SLOPE[ease]` × (|to − from| × Δt / durationMs) + ε, where |·| is the Euclidean length for vectors, Δt the real time between the two samples, and ε = 0.02 world units (1 for scalar series such as counting numbers). A sample pair that spans the end of one tween and the start of the next is judged against the later sample's tween. The spec asserts that the trace holds series for cards (`obj:card:`), chips (`obj:chips:`), seats (`obj:seat:`) and the host panel (`obj:panel:host`), and that `window.__animTraceDropped` is 0 or undefined.
+
+**E2E setup (W-E2E-2).** Also owns `e2e/helpers.ts`: users, friendships, the game, invites and opening the table are made through the REST API (`request.newContext` with an `Origin: http://localhost:5173` header), then each browser context gets its session cookie. Only the table itself is driven through the UI. The game is created with `autoStart: false`, so the host clicks "Start game" after all three sit. `turnSeconds: 30`.
+
+**Ownership notes.** `apps/web/src/table/table.css` (shared table styles) belongs to W11; W8, W9 and W10 each own a css file named after their component (`seatHud.css`, `actionBar.css`, `chat.css`). No task edits `theme.css`, `package.json` or another task's file; anything missing is reported to the lead.
+
 ---
 
 ## Tasks
@@ -686,6 +771,8 @@ All web tasks: own the listed files under `apps/web/src/` and their tests `apps/
 Parallel: W1, W2, W3, W4, W-E2E-1. W3/W4 import `api/client.ts` and `anim/tween.ts` via the I-6 interfaces and mock them in their unit tests.
 
 ### Checkpoint 8: The table (parallel)
+
+**Read I-11 first: it adds task W0 (runs alone, before the others) and overrides the task text below where they differ.**
 
 **W5 Table scene.** Owns `src/table/Table3D.tsx`, `src/table/layout.ts`, `src/table/Felt.tsx`, `test/layout.test.ts`. A `<Canvas>` with `frameloop="demand"` while idle, switching to `"always"` while any tween runs (`invalidate()` from tweens). Perspective camera at ~35° tilt, fov 40, looking at the table centre. Oval felt with a rim (a lathe or extruded ellipse shape), soft shadow, subtle vignette. Responsive: the camera distance adjusts to the aspect ratio so all 9 seats fit at 390 px wide. Exposes `<Table3D>{children}</Table3D>` plus a `SceneContext` with layout helpers. layout test: 9 seats distinct, viewer seat at bottom centre for every `mySeat`, positions symmetric. Proof: `npx vitest run apps/web/test/layout.test.ts`.
 
@@ -1187,4 +1274,9 @@ Review run 2026-11-24 by a fresh sub-agent (checked versions with `npm view` and
   - W-E2E-1: `reset-db.ts` refuses to run unless the database name ends in `_e2e`. The spec uses the form's default (cash) game type. API calls made outside a page need an `Origin: http://localhost:5173` header (CSRF check); `page.request` from a context works for GETs.
 - Note for later e2e specs: the "Game type" select in SettingsForm is labelled "Game type" with options "Cash game" and "Tournament".
 
-Next: checkpoint 8. Start a fresh session on Fable: this session's context is past half.
+### Checkpoint 8: The table, 2026-11-26 (in progress)
+- Lead: Fable 5.2 (the session opened on Opus 5.5; the user switched it before any checkpoint work). Sub-agents on Opus.
+- Branch: the user decided that this session pushes to `claude/elegant-meitner-a3zy54` (fast-forwarded from `ccr-f5339883-mfcgzv` at `e90495b`), not to `ccr-f5339883-mfcgzv`.
+- Setup by hand again (Postgres start, role, databases, `npm ci`): the session opened on a branch without `poker/`.
+- WebGL works in this container's headless Chromium (SwiftShader, WebGL 2, about 60 frames a second on an empty page).
+- Before the build the lead wrote section I-11 into this plan.
