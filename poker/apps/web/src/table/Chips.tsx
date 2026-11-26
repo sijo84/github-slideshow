@@ -1,14 +1,14 @@
 /**
  * Chips (W7). Renders the store's `chips: ChipEntity[]` inside the r3f Canvas, declaratively (PLAN I-11):
  * one group per entity, at the position `useTweenedPosition` gives it, with the tween chosen by the pure
- * `chipMotion`. Bets and pots carry an amount label (drei `<Html>`) that counts with `useTween`.
+ * `chipMotion`. Bets and pots carry an amount label (`DomAnchor`, StrictMode-safe) that counts with `useTween`.
  */
 import { formatPlayMoney, type Chips as ChipCount } from '@poker/engine';
-import { Html } from '@react-three/drei';
 import { useEffect, useMemo } from 'react';
 import { CylinderGeometry, MeshStandardMaterial } from 'three';
 import { useTween, useTweenedPosition } from '../anim/tween.js';
 import { chipLabel, chipMotion } from './chipMotion.js';
+import { DomAnchor } from './DomAnchor.js';
 import { CHIP_DENOMS, chipStacks } from './chipStacks.js';
 import { useScene } from './sceneContext.js';
 import { useTable } from './storeContext.js';
@@ -93,16 +93,17 @@ function ChipEntityView({ entity, bigBlind, kit }: { entity: ChipEntity; bigBlin
       ))}
       {label && (
         <group position={[halfWidth + 0.18, 0.06, 0]}>
-          <Html center zIndexRange={[20, 0]}>
+          <DomAnchor zIndex={15} pointerEvents="none" className={label.prefix ? 'chip-label chip-label--pot' : 'chip-label'}>
             <ChipAmountLabel id={entity.id} testId={label.testId} prefix={label.prefix} amount={entity.amount} />
-          </Html>
+          </DomAnchor>
         </group>
       )}
     </group>
   );
 }
 
-/** The DOM label (exported for tests and the replayer; no Canvas needed). Counts up/down with a tween. */
+/** The DOM label text (exported for tests and the replayer; no Canvas needed). Counts up/down with a tween.
+ *  The pill styling (`.chip-label`) sits on the DomAnchor wrapper around it. */
 export function ChipAmountLabel({
   id,
   testId,
@@ -117,7 +118,7 @@ export function ChipAmountLabel({
   const shown = Math.round(useTween(amount, { id: 'amount:' + id, durationMs: 300 }));
   const money = formatPlayMoney(shown);
   return (
-    <div className={prefix ? 'chip-label chip-label--pot' : 'chip-label'} data-testid={testId}>
+    <span data-testid={testId}>
       {prefix ? (
         <>
           <span className="chip-label__prefix">{prefix}</span> {money}
@@ -125,6 +126,6 @@ export function ChipAmountLabel({
       ) : (
         money
       )}
-    </div>
+    </span>
   );
 }
