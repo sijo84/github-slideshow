@@ -1,6 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -45,7 +44,7 @@ function routeApi(opts: { putFails?: boolean } = {}) {
 
 function NotesProbe() {
   const notes = useNotes();
-  return <output data-testid="probe">{JSON.stringify(notes[BOB] ?? null)}</output>;
+  return <div data-testid="probe">{JSON.stringify(notes[BOB] ?? null)}</div>;
 }
 
 function Harness({ subjectId = BOB, name = 'Bob' }: { subjectId?: string; name?: string }) {
@@ -64,7 +63,8 @@ function Harness({ subjectId = BOB, name = 'Bob' }: { subjectId?: string; name?:
   );
 }
 
-/** Let resolved promises run (fake timers do not touch microtasks). */
+/** Let resolved promises run (fake timers do not touch microtasks). user-event is not used in this file: Testing
+ *  Library's async wrapper waits on a setTimeout that the fake timers hold, so changes go through fireEvent. */
 async function settle() {
   await act(async () => {
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -115,13 +115,16 @@ describe('NotesPopover', () => {
 
   it('autosaves once, 600 ms after the last change, with the latest text and colour', async () => {
     routeApi();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<Harness />);
     await settle();
     const field = screen.getByLabelText('Private note');
-    await user.clear(field);
-    await user.type(field, 'Calls too much');
-    await user.click(screen.getByRole('radio', { name: 'Blue' }));
+    // Typing over 1 s, one change every 200 ms: no save while the user keeps going.
+    for (const v of ['', 'Calls', 'Calls too', 'Calls too much']) {
+      fireEvent.change(field, { target: { value: v } });
+      act(() => vi.advanceTimersByTime(200));
+    }
+    expect(puts()).toHaveLength(0);
+    fireEvent.click(screen.getByRole('radio', { name: 'Blue' }));
 
     act(() => vi.advanceTimersByTime(599));
     expect(puts()).toHaveLength(0);
@@ -156,12 +159,11 @@ describe('NotesPopover', () => {
 
   it('Escape closes and flushes the pending change', async () => {
     routeApi();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<Harness />);
     await settle();
-    await user.type(screen.getByLabelText('Private note'), '!');
+    fireEvent.change(screen.getByLabelText('Private note'), { target: { value: 'Bluffs the river!' } });
     expect(puts()).toHaveLength(0);
-    await user.keyboard('{Escape}');
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(puts()).toHaveLength(1);
     expect(puts()[0]?.[1]).toEqual({ method: 'PUT', body: { text: 'Bluffs the river!', color: 'red' } });
@@ -173,10 +175,9 @@ describe('NotesPopover', () => {
 
   it('the Close button closes; nothing is saved without a change', async () => {
     routeApi();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<Harness />);
     await settle();
-    await user.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('dialog')).toBeNull();
     act(() => vi.advanceTimersByTime(1000));
     expect(puts()).toHaveLength(0);
@@ -184,10 +185,9 @@ describe('NotesPopover', () => {
 
   it('flushes a pending change on unmount', async () => {
     routeApi();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const { unmount } = render(<Harness />);
     await settle();
-    await user.click(screen.getByRole('radio', { name: 'Green' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Green' }));
     unmount();
     expect(puts()).toHaveLength(1);
     expect(puts()[0]?.[1]).toEqual({ method: 'PUT', body: { text: 'Bluffs the river', color: 'green' } });
@@ -195,10 +195,9 @@ describe('NotesPopover', () => {
 
   it('shows an error when the save fails', async () => {
     routeApi({ putFails: true });
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<Harness />);
     await settle();
-    await user.type(screen.getByLabelText('Private note'), '?');
+    fireEvent.change(screen.getByLabelText('Private note'), { target: { value: 'Bluffs the river?' } });
     act(() => vi.advanceTimersByTime(600));
     await settle();
     expect(screen.getByRole('alert')).toHaveTextContent('Server is down');

@@ -35,9 +35,9 @@ export const FELT_Y = 0.02;
 /** A bet sits this fraction of the way from the table centre to its seat. */
 export const BET_FRACTION = 0.6;
 /** The dealer button sits this fraction of the way from the centre to the seat... */
-export const BUTTON_FRACTION = 0.7;
+export const BUTTON_FRACTION = 0.68;
 /** ...and this far to the side of that point (counter-clockwise along the rim, as the viewer sees it). */
-export const BUTTON_SIDE = 0.4;
+export const BUTTON_SIDE = 0.55;
 
 /** Distance between board card centres on x. */
 export const BOARD_SPACING = 0.62;

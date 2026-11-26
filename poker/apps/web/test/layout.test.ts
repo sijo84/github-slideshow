@@ -16,6 +16,8 @@ import {
 } from '../src/table/layout.js';
 import { cardPlacePosition } from '../src/table/sceneContext.js';
 
+/** Centre-to-centre distance below which two things on the felt (cards ~0.45 wide, chip stacks ~0.4) touch. */
+const MIN_GAP = 0.44;
 const SEAT_COUNTS = [2, 3, 4, 5, 6, 7, 8, 9];
 const viewers = (n: number): (number | null)[] => [null, ...Array.from({ length: n }, (_, i) => i)];
 const dist = (a: Vec3, b: Vec3): number => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
@@ -107,6 +109,7 @@ describe('bets, button, board, pots', () => {
     for (const n of SEAT_COUNTS) {
       for (const me of viewers(n)) {
         const scene = makeScene(n, me);
+        const problems: string[] = [];
         const items: { name: string; p: Vec3; seat?: number }[] = [];
         for (let s = 0; s < n; s++) {
           items.push({ name: `bet${s}`, p: scene.betPosition(s), seat: s });
@@ -126,8 +129,9 @@ describe('bets, button, board, pots', () => {
             if (a.name.startsWith('hole') && b.name.startsWith('hole') && a.seat === b.seat) continue;
             if (a.name.startsWith('button') && b.name.startsWith('button')) continue;
             const d = dist(a.p, b.p);
-            if (d < 0.4) throw new Error(`n=${n} me=${me}: ${a.name} and ${b.name} are ${d.toFixed(2)} apart`);
+            if (d < MIN_GAP) problems.push(`n=${n} me=${me}: ${a.name} and ${b.name} are ${d.toFixed(2)} apart`);
           }
+        expect(problems).toEqual([]);
       }
     }
   });

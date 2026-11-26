@@ -48,7 +48,7 @@ export function potSizedTo(
   return clampAmount(myBet + call + potAfterCall * fraction, legal);
 }
 
-const money = (n: number): string => `$${formatPlayMoney(n)}`;
+const money = (n: number): string => formatPlayMoney(n);
 
 function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;

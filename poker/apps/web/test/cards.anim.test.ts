@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { easeInOutCubic, easeOutBack, easeOutCubic, type Vec3 } from '../src/anim/easing.js';
 import {
@@ -131,7 +131,7 @@ describe('arc lift', () => {
 });
 
 describe('Cards.tsx source guard', () => {
-  const src = readFileSync(fileURLToPath(new URL('../src/table/Cards.tsx', import.meta.url)), 'utf8');
+  const src = readFileSync(resolve(__dirname, '../src/table/Cards.tsx'), 'utf8');
 
   it('sets a position only from the tweened value', () => {
     const props = src.match(/position=\{[^}]*\}/g) ?? [];
