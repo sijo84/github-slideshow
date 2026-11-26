@@ -149,10 +149,11 @@
 
 /* Empty seats */
 .seat-hud--empty {
+  width: auto;
   background: transparent;
-  border-style: dashed;
+  border: 0;
   box-shadow: none;
-  padding: 4px;
+  padding: 0;
 }
 .seat-hud__sit {
   display: inline-flex;
