@@ -87,7 +87,10 @@ export function TablePage(): JSX.Element {
 
   const { me } = useMe();
   const myId = me?.id ?? null;
-  useEffect(() => (myId === null ? undefined : connectTable(id, tableStore, myId)), [id, myId]);
+  useEffect(
+    () => (myId === null ? undefined : connectTable(id, tableStore, myId)),
+    [id, myId],
+  );
 
   useEffect(() => {
     const ctrl = new AbortController();

@@ -2,20 +2,17 @@
  * Seat HUD (W8; PLAN I-11 "DOM facts → Seat").
  * - `SeatHudView`: the plain-DOM HUD of one seat (avatar, name, stack, status chips, equity badge, hole cards as
  *   screen-reader text, turn ring, "Your turn"), or the empty-seat "Sit at seat n" button / placeholder.
- * - `SeatHud`: the same inside the r3f Canvas, anchored at the seat with `DomAnchor` (a StrictMode-safe
- *   equivalent of drei `<Html center>`, see there). It renders into a separate React root, so the table store,
- *   scene and seat-action contexts are read here and provided again inside it.
+ * - `SeatHud`: the same inside the r3f Canvas, anchored at the seat with `DomAnchor` (DomAnchor.tsx, a
+ *   StrictMode-safe equivalent of drei `<Html center>` that re-provides the table contexts in its own root).
  * - `DealerButton`: the "D" marker, tweening between seats.
  */
 import { formatCard, formatPlayMoney, type Card, type SeatIndex } from '@poker/engine';
-import { useFrame, useThree } from '@react-three/fiber';
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
-import { Vector3, type Group } from 'three';
+import { useState } from 'react';
 import { easeOutBack, useTween, useTweenedPosition } from '../anim/tween.js';
+import { DomAnchor } from './DomAnchor.js';
 import { useNotes } from './NotesPopover.js';
-import { SceneContext, SeatActionsContext, useScene, useSeatActions } from './sceneContext.js';
-import { TableStoreProvider, useTable, useTableStoreApi } from './storeContext.js';
+import { useScene, useSeatActions } from './sceneContext.js';
+import { useTable } from './storeContext.js';
 import { TurnRing } from './TurnRing.js';
 import type { Equity } from './types.js';
 import './seatHud.css';
@@ -229,105 +226,14 @@ export function SeatHudView({ seat }: { seat: SeatIndex }) {
 // ---------------------------------------------------------------------------------------------------------
 // In the Canvas
 
-/**
- * A minimal stand-in for drei `<Html center>` (screen-space DOM anchored at this group's world position).
- *
- * Why not drei's `<Html>`: it creates its React root in a layout effect and unmounts it synchronously in that
- * effect's cleanup, on one shared container element. Under React StrictMode (main.tsx) every layout effect is
- * run, cleaned up and run again on mount, so each HUD logged "Attempted to synchronously unmount a root while
- * React was already rendering", and the deferred unmount of the first root raced the second root on the same
- * element, which sometimes left a HUD (seen on seat 0) empty and missing from the DOM. The same happens when
- * its mount target changes (r3f connects `events.connected` after the first commit).
- *
- * Here every mount gets a fresh container element and its own root, and the old root is unmounted after the
- * commit (`setTimeout`), so nothing is shared and nothing unmounts during a render. Like drei, the children
- * render in a separate React root, so callers re-provide the contexts they need.
- */
-function DomAnchor({
-  children,
-  zIndex,
-  pointerEvents = 'auto',
-}: {
-  children: ReactNode;
-  zIndex: number;
-  pointerEvents?: 'auto' | 'none';
-}) {
-  const camera = useThree((s) => s.camera);
-  const width = useThree((s) => s.size.width);
-  const height = useThree((s) => s.size.height);
-  const connected = useThree((s) => s.events.connected as unknown);
-  const canvasParent = useThree((s) => s.gl.domElement.parentNode);
-  const target = connected instanceof HTMLElement ? connected : canvasParent instanceof HTMLElement ? canvasParent : null;
-  const group = useRef<Group>(null);
-  const holder = useRef<{ el: HTMLDivElement; root: Root } | null>(null);
-  const last = useRef({ x: NaN, y: NaN, hidden: false });
-  const sizeRef = useRef({ width, height });
-  sizeRef.current = { width, height };
-
-  const place = useCallback(() => {
-    const h = holder.current;
-    const g = group.current;
-    if (!h || !g) return;
-    g.updateWorldMatrix(true, false);
-    const v = new Vector3().setFromMatrixPosition(g.matrixWorld).project(camera);
-    const hidden = v.z < -1 || v.z > 1; // behind the camera or past the far plane
-    const x = (v.x * 0.5 + 0.5) * sizeRef.current.width;
-    const y = (-v.y * 0.5 + 0.5) * sizeRef.current.height;
-    const l = last.current;
-    if (hidden !== l.hidden) h.el.style.display = hidden ? 'none' : 'block';
-    if (Math.abs(x - l.x) > 0.01 || Math.abs(y - l.y) > 0.01 || Number.isNaN(l.x)) {
-      h.el.style.transform = `translate3d(${x}px,${y}px,0)`;
-    }
-    last.current = { x, y, hidden };
-  }, [camera]);
-
-  useLayoutEffect(() => {
-    if (!target) return;
-    const el = document.createElement('div');
-    el.style.cssText = `position:absolute;top:0;left:0;transform-origin:0 0;z-index:${zIndex};`;
-    target.appendChild(el);
-    const root = createRoot(el);
-    holder.current = { el, root };
-    last.current = { x: NaN, y: NaN, hidden: false };
-    place();
-    return () => {
-      if (holder.current?.root === root) holder.current = null;
-      el.remove();
-      setTimeout(() => root.unmount(), 0);
-    };
-  }, [target, zIndex, place]);
-
-  // Re-render the children into the root on every commit (like drei).
-  useLayoutEffect(() => {
-    holder.current?.root.render(
-      <div style={{ position: 'absolute', transform: 'translate3d(-50%,-50%,0)', pointerEvents }}>{children}</div>,
-    );
-  });
-
-  // Re-place after every commit (the group moved, the canvas resized) and on every drawn frame (camera moves).
-  useLayoutEffect(() => {
-    place();
-  });
-  useFrame(place);
-
-  return <group ref={group} />;
-}
-
 export function SeatHud({ seat }: { seat: SeatIndex }) {
-  const store = useTableStoreApi();
   const scene = useScene();
-  const actions = useSeatActions();
   const position = useTweenedPosition('seat:' + seat, scene.seatPosition(seat));
+  // DomAnchor renders in its own React root and re-provides the table store, scene and seat-action contexts.
   return (
     <group position={position}>
       <DomAnchor zIndex={20}>
-        <TableStoreProvider store={store}>
-          <SceneContext.Provider value={scene}>
-            <SeatActionsContext.Provider value={actions}>
-              <SeatHudView seat={seat} />
-            </SeatActionsContext.Provider>
-          </SceneContext.Provider>
-        </TableStoreProvider>
+        <SeatHudView seat={seat} />
       </DomAnchor>
     </group>
   );
