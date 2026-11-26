@@ -1,0 +1,275 @@
+/* Seat HUD (W8). Sizes are clamped to the viewport so nine seats fit side by side at 390 px wide. */
+
+.seat-hud {
+  --seat-w: clamp(66px, 18vw, 120px);
+  --avatar: clamp(30px, 8.5vw, 52px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: var(--seat-w);
+  padding: 4px 4px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(24, 28, 26, 0.86);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: clamp(10px, 2.8vw, 13px);
+  line-height: 1.25;
+  text-align: center;
+  transform-origin: 50% 50%;
+  user-select: none;
+  position: relative;
+}
+
+.seat-hud--active {
+  border-color: var(--felt-strong);
+  box-shadow: 0 0 0 1px var(--felt-strong), 0 6px 16px rgba(0, 0, 0, 0.45);
+}
+.seat-hud--me {
+  border-color: rgba(217, 180, 90, 0.6);
+}
+.seat-hud--folded {
+  opacity: 0.55;
+}
+.seat-hud--away .seat-hud__avatar {
+  filter: grayscale(1);
+}
+
+.seat-hud__who {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+.seat-hud__who--button {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.seat-hud__who--button:hover .seat-hud__name {
+  text-decoration: underline;
+}
+
+.seat-hud__avatar-wrap {
+  position: relative;
+  display: block;
+  width: var(--avatar);
+  height: var(--avatar);
+}
+.seat-hud__avatar {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface-2);
+}
+
+.seat-hud__note {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid var(--bg);
+  background: var(--text-muted);
+}
+
+.seat-hud__name {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.seat-hud__stack {
+  font-weight: 600;
+  color: #f1d896;
+}
+
+.seat-hud__chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  max-width: 100%;
+}
+.seat-hud__chips:empty {
+  display: none;
+}
+
+.seat-hud__chip,
+.seat-hud__equity {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 0.85em;
+  line-height: 1.5;
+  white-space: nowrap;
+  background: var(--surface-2);
+}
+.seat-hud__chip--folded {
+  color: var(--text-muted);
+}
+.seat-hud__chip--allin {
+  background: var(--red-strong);
+  border-color: var(--red-strong);
+  color: #fff;
+}
+.seat-hud__chip--away {
+  background: var(--blue-tint);
+}
+.seat-hud__equity {
+  background: var(--felt-tint);
+  border-color: var(--felt-strong);
+  color: #bdf0d4;
+}
+
+.seat-hud__turn {
+  font-size: 0.85em;
+  font-weight: 650;
+  color: var(--focus);
+}
+.seat-hud__turn:empty {
+  display: none;
+}
+
+/* Empty seats */
+.seat-hud--empty {
+  background: transparent;
+  border-style: dashed;
+  box-shadow: none;
+  padding: 4px;
+}
+.seat-hud__sit {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: var(--avatar);
+  height: var(--avatar);
+  border: 1px dashed var(--border-strong);
+  border-radius: 50%;
+  background: rgba(24, 28, 26, 0.7);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9em;
+  line-height: 1;
+  cursor: pointer;
+}
+.seat-hud__sit:hover {
+  border-color: var(--felt-strong);
+  background: var(--felt-tint);
+}
+.seat-hud__sit-text {
+  font-size: 0.8em;
+}
+.seat-hud__placeholder {
+  display: block;
+  width: var(--avatar);
+  height: var(--avatar);
+  border-radius: 50%;
+  border: 1px dashed var(--border);
+  opacity: 0.4;
+}
+
+/* Turn ring */
+.turn-ring {
+  position: absolute;
+  inset: -5px;
+  display: block;
+  pointer-events: none;
+  --ring: #5fd497;
+}
+.turn-ring--warn {
+  --ring: #f0b43c;
+}
+.turn-ring--bank {
+  --ring: var(--red);
+}
+.turn-ring__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  overflow: visible;
+}
+.turn-ring__track,
+.turn-ring__glow,
+.turn-ring__progress {
+  fill: none;
+}
+.turn-ring__track {
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 6;
+}
+.turn-ring__glow {
+  stroke: var(--ring);
+  stroke-width: 12;
+  opacity: 0.5;
+  filter: blur(3px);
+}
+.turn-ring__progress {
+  stroke: var(--ring);
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+.turn-ring__bank {
+  position: absolute;
+  left: 50%;
+  bottom: -2px;
+  transform: translate(-50%, 50%);
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--red-strong);
+  color: #fff;
+  font-size: 0.7em;
+  font-weight: 650;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Dealer button */
+.dealer-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid #b9b2a0;
+  background: #f4f1e8;
+  color: #1b1b1b;
+  font: 700 11px/1 var(--font);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  user-select: none;
+}
+
+@media (max-width: 480px) {
+  .seat-hud {
+    padding: 3px 3px 4px;
+    gap: 1px;
+  }
+  .seat-hud__chip,
+  .seat-hud__equity {
+    padding: 0 3px;
+  }
+  .dealer-button {
+    width: 16px;
+    height: 16px;
+    font-size: 9px;
+  }
+}

@@ -1,0 +1,184 @@
+/* Chat panel + notes popover (W10). Tokens come from ui/theme.css. */
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  min-height: 0;
+  padding: var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.chat-scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+.chat-list {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 240px;
+  min-height: 96px;
+  margin: 0;
+  padding: 0 var(--space-1);
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.chat-msg {
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  will-change: opacity, transform;
+}
+
+.chat-name {
+  font-weight: 600;
+  color: var(--gold);
+}
+
+.chat-text {
+  white-space: pre-wrap;
+}
+
+.chat-jump {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-2);
+  transform: translateX(-50%);
+  box-shadow: var(--shadow);
+}
+
+.chat-error {
+  margin: 0;
+  padding: 6px var(--space-2);
+  font-size: 0.875rem;
+}
+
+.chat-form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.chat-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chat-count {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 420px) {
+  .chat-list {
+    max-height: 180px;
+  }
+}
+
+/* ---------- Notes popover ---------- */
+
+.notes-popover {
+  position: fixed;
+  z-index: 50;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(340px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  box-shadow: var(--shadow);
+}
+
+.notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.notes-head h3 {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.notes-popover textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.notes-colors {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.notes-colors legend {
+  width: 100%;
+  margin-bottom: var(--space-1);
+  padding: 0;
+}
+
+.notes-color {
+  position: relative;
+  display: inline-flex;
+  cursor: pointer;
+}
+
+.notes-color input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.notes-swatch {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+}
+
+.notes-swatch-none {
+  background: linear-gradient(135deg, transparent 45%, var(--text-muted) 45%, var(--text-muted) 55%, transparent 55%);
+}
+
+.notes-color input:checked + .notes-swatch {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--focus);
+}
+
+.notes-color input:focus-visible + .notes-swatch {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.notes-status {
+  min-height: 1.25em;
+}
+
+.notes-error {
+  color: var(--red);
+}

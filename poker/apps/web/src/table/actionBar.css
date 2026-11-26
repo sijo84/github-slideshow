@@ -1,0 +1,117 @@
+/* Action bar (W9). Sits at the bottom of the table overlay; usable from 390 px wide. */
+
+.action-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, rgba(18, 21, 19, 0.96), rgba(18, 21, 19, 0.82));
+  border-top: 1px solid var(--border);
+  pointer-events: auto;
+  will-change: transform;
+}
+
+.action-bar[data-enabled='false'] .action-bar-buttons {
+  opacity: 0.85;
+}
+
+.action-bar-buttons,
+.action-bar-presets,
+.action-bar-pre {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.action-bar-btn {
+  min-height: 44px;
+  min-width: 88px;
+  flex: 1 1 96px;
+  max-width: 220px;
+}
+
+.action-bar-preset {
+  min-height: 44px;
+  flex: 1 1 64px;
+  max-width: 120px;
+}
+
+.action-bar-sizing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.action-bar-amount {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.action-bar-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  accent-color: var(--felt-strong);
+}
+
+.action-bar-field input {
+  width: 7.5em;
+  min-height: 44px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-family: var(--font-mono);
+}
+
+.action-bar-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.action-bar-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--felt-strong);
+}
+
+@media (max-width: 480px) {
+  .action-bar {
+    padding-left: var(--space-2);
+    padding-right: var(--space-2);
+  }
+  .action-bar-btn {
+    max-width: none;
+    min-width: 0;
+  }
+  .action-bar-preset {
+    max-width: none;
+  }
+  .action-bar-pre {
+    justify-content: stretch;
+  }
+  .action-bar-check {
+    flex: 1 1 140px;
+  }
+}

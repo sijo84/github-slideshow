@@ -1,0 +1,265 @@
+/* Table page (W11b). Shared table styles; every class is prefixed `table-` (`.table` and `.table-wrap` in
+   theme.css are the data-table styles and are not used here). */
+
+.table-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: var(--space-3);
+  min-width: 0;
+}
+
+/* ---------- Header ---------- */
+
+.table-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+.table-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.table-title h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table-status {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface-2, var(--surface));
+  border: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+}
+.table-status-running {
+  border-color: var(--felt-strong);
+  background: var(--felt-tint);
+}
+.table-status-paused {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.table-status-finished {
+  border-color: var(--red);
+}
+.table-stakes {
+  color: var(--text-muted);
+}
+.table-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+.table-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.table-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+/* ---------- Main area ---------- */
+
+.table-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.table-stage {
+  position: relative;
+  min-width: 0;
+  height: min(72vh, 720px);
+  min-height: 360px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: radial-gradient(ellipse at center, var(--felt-deep) 0%, var(--bg) 75%);
+}
+.table-stage > [data-testid='table-3d'] {
+  position: absolute;
+  inset: 0;
+}
+
+/* The overlay sits on top of the canvas; only its controls take pointer events. */
+.table-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.table-overlay-bottom {
+  pointer-events: auto;
+  padding: var(--space-2);
+}
+
+.table-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.table-side-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+.table-side-section > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: var(--space-1) 0;
+}
+
+/* ---------- Hand log ---------- */
+
+.table-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.table-log > li {
+  padding: 2px 0;
+}
+.table-log-info {
+  color: var(--text-muted);
+}
+.table-log-good {
+  color: var(--focus);
+}
+.table-log-bad {
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* ---------- Seat requests, game over ---------- */
+
+.table-requests ul,
+.table-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.table-requests li,
+.table-results li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 6px 0;
+}
+.table-results li {
+  justify-content: flex-start;
+}
+.table-results-place {
+  min-width: 2ch;
+  color: var(--gold);
+  font-weight: 700;
+}
+.table-results-name {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- Sit dialog ---------- */
+
+.table-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3);
+  background: rgba(0, 0, 0, 0.55);
+}
+.table-dialog {
+  width: 100%;
+  max-width: 420px;
+  box-shadow: var(--shadow);
+}
+.table-dialog:focus {
+  outline: none;
+}
+.table-dialog input[type='range'] {
+  width: 100%;
+}
+
+/* ---------- Host slide-over ---------- */
+
+/* A clipping layer so the closed panel (translated 100% to the right) never widens the page. */
+.table-host-layer {
+  position: fixed;
+  top: var(--shell-height);
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  overflow: hidden;
+  pointer-events: none;
+}
+.table-host-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(420px, 100%);
+  overflow-y: auto;
+  padding: var(--space-3);
+  background: var(--bg-elevated);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+  will-change: transform;
+}
+.table-host-panel[data-open='false'] {
+  pointer-events: none;
+}
+
+/* ---------- Narrow screens ---------- */
+
+@media (max-width: 900px) {
+  .table-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .table-stage {
+    height: min(62vh, 560px);
+  }
+}
+@media (max-width: 480px) {
+  .table-page {
+    padding: var(--space-2);
+  }
+  .table-buttons {
+    margin-left: 0;
+  }
+  .table-stage {
+    min-height: 320px;
+  }
+}
