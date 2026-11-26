@@ -164,7 +164,7 @@ export async function sitDown(page: Page, seat: number, buyIn: number, name?: st
   await page.getByRole('button', { name: `Sit at seat ${seat + 1}`, exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Sit down' });
   await expect(dialog).toBeVisible();
-  await setFieldValue(dialog.getByLabel('Buy-in'), buyIn);
+  await setFieldValue(dialog.getByLabel('Buy-in', { exact: true }), buyIn);
   await dialog.getByRole('button', { name: 'Sit down', exact: true }).click();
   const hud = page.getByTestId(`seat-${seat}`);
   await expect(hud).toHaveAttribute('data-me', 'true');
