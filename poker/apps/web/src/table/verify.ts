@@ -104,6 +104,8 @@ export interface ProofBook {
   /** Cards this viewer was shown, by deck position (from dealHole/street/showCards). */
   revealed: Map<number, Card>;
   boardCount: number;
+  /** A position was shown with two different cards (e.g. dealt as one card, shown as another). */
+  conflict: boolean;
   proofs: { position: number; card: Card; hashOk: boolean }[];
 }
 
@@ -116,8 +118,15 @@ export function createProofBook(hs: HandStarted, mySeat: SeatIndex | null): Proo
     dealtIn: mySeat !== null && hs.seats.some((s) => s.seat === mySeat),
     revealed: new Map(),
     boardCount: 0,
+    conflict: false,
     proofs: [],
   };
+}
+
+function reveal(book: ProofBook, position: number, card: Card): void {
+  const prev = book.revealed.get(position);
+  if (prev !== undefined && prev !== card) book.conflict = true;
+  book.revealed.set(position, card);
 }
 
 /** Notes the cards a hand event shows this viewer, so proofs can be matched to them. */
@@ -127,13 +136,13 @@ export function recordHandEvent(book: ProofBook, event: HandEvent): void {
     if (!ps) return;
     event.cards.forEach((card, r) => {
       const p = ps[r];
-      if (p !== undefined) book.revealed.set(p, card);
+      if (p !== undefined) reveal(book, p, card);
     });
   } else if (event.type === 'street') {
     event.cards.forEach((card) => {
       const p = book.map.board[book.boardCount];
       book.boardCount++;
-      if (p !== undefined) book.revealed.set(p, card);
+      if (p !== undefined) reveal(book, p, card);
     });
   }
 }
@@ -152,6 +161,7 @@ export function recordProof(book: ProofBook, proof: CardProof): boolean {
 
 /** 'ok' when every proof received checks out and, if I was dealt in, both my hole cards were proven. */
 export function proofVerdict(book: ProofBook): 'ok' | 'failed' {
+  if (book.conflict) return 'failed';
   if (!book.proofs.every((p) => proofMatches(book, p))) return 'failed';
   if (book.dealtIn && book.mySeat !== null) {
     const mine = book.map.hole.get(book.mySeat);
