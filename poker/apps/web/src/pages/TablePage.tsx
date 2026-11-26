@@ -77,6 +77,31 @@ export function formatCountdown(ms: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+/** localStorage key of the per-browser four-colour deck option ("1" on, anything else off). */
+export const FOUR_COLOUR_KEY = "poker.fourColour";
+
+function readFourColour(): boolean {
+  try {
+    return localStorage.getItem(FOUR_COLOUR_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** The four-colour deck option, remembered per browser (default off; storage failures are ignored). */
+function useFourColour(): [boolean, (on: boolean) => void] {
+  const [on, setOn] = useState(readFourColour);
+  const set = useCallback((next: boolean) => {
+    setOn(next);
+    try {
+      localStorage.setItem(FOUR_COLOUR_KEY, next ? "1" : "0");
+    } catch {
+      // Storage unavailable (private mode, blocked): the choice lasts for this page only.
+    }
+  }, []);
+  return [on, set];
+}
+
 function emitHost(gameId: string, command: HostCommand): void {
   getSocket().emit("host:command", { gameId, command });
 }
@@ -167,6 +192,7 @@ function TableScreen({
   } | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [hostOpen, setHostOpen] = useState(false);
+  const [fourColour, setFourColour] = useFourColour();
 
   const isHost = game !== null && me !== null && me.id === game.host.id;
   const mine =
@@ -274,6 +300,14 @@ function TableScreen({
                 Host panel
               </button>
             )}
+            <label className="field-inline table-option small">
+              <input
+                type="checkbox"
+                checked={fourColour}
+                onChange={(e) => setFourColour(e.target.checked)}
+              />
+              <span>Four-colour deck</span>
+            </label>
           </div>
         </header>
 
@@ -313,7 +347,7 @@ function TableScreen({
                 </div>
               }
             >
-              <Cards />
+              <Cards fourColour={fourColour} />
               <Chips />
               <DealerButton />
               {seatNumbers.map((n) => (

@@ -43,6 +43,12 @@ const mocks = vi.hoisted(() => {
     },
     seatActions: { current: null as SeatActions | null },
     store: { current: null as unknown },
+    Cards: ({ fourColour }: { fourColour?: boolean }) => (
+      <div
+        data-testid="cards-mock"
+        data-four-colour={String(fourColour === true)}
+      />
+    ),
   };
 });
 
@@ -64,12 +70,28 @@ vi.mock("../src/api/useMe.js", () => ({
 vi.mock("../src/workers/useEquity.js", () => ({
   useEquity: () => mocks.requestEquity,
 }));
-vi.mock("../src/table/Table3D.js", () => ({
-  // jsdom has no WebGL: the canvas children are rendered nowhere, the overlay in a plain div.
-  Table3D: ({ overlay }: { children?: ReactNode; overlay?: ReactNode }) => (
-    <div data-testid="table-3d">{overlay}</div>
-  ),
-}));
+vi.mock("../src/table/Table3D.js", async () => {
+  const { Children, isValidElement } = await import("react");
+  return {
+    // jsdom has no WebGL: the canvas children are rendered nowhere (except the mocked <Cards>, so its props can
+    // be checked), the overlay in a plain div.
+    Table3D: ({
+      children,
+      overlay,
+    }: {
+      children?: ReactNode;
+      overlay?: ReactNode;
+    }) => (
+      <div data-testid="table-3d">
+        {Children.toArray(children).filter(
+          (c) => isValidElement(c) && c.type === mocks.Cards,
+        )}
+        {overlay}
+      </div>
+    ),
+  };
+});
+vi.mock("../src/table/Cards.js", () => ({ Cards: mocks.Cards }));
 vi.mock("../src/table/useTableStore.js", async () => {
   const { createBareTableStore } = await import("../src/table/storeContext.js");
   const tableStore = createBareTableStore();
@@ -109,7 +131,11 @@ vi.mock("../src/pages/HostPanel.js", () => ({
 
 import type { StoreApi } from "zustand";
 import { initialTableState } from "../src/table/types.js";
-import { formatCountdown, TablePage } from "../src/pages/TablePage.js";
+import {
+  FOUR_COLOUR_KEY,
+  formatCountdown,
+  TablePage,
+} from "../src/pages/TablePage.js";
 
 const store = (): StoreApi<TableState> =>
   mocks.store.current as StoreApi<TableState>;
@@ -222,6 +248,7 @@ function emitted(event: string): unknown[] {
 
 beforeEach(() => {
   wallet = 5000;
+  localStorage.clear();
   mocks.api.mockReset();
   mocks.api.mockImplementation(routeApi);
   mocks.emit.mockReset();
@@ -651,5 +678,72 @@ describe("TablePage", () => {
     expect(
       within(panel).getByRole("link", { name: "Back to game" }),
     ).toHaveAttribute("href", `/games/${GAME_ID}`);
+  });
+
+  it("has a four-colour deck option, off by default, remembered in localStorage", async () => {
+    const user = userEvent.setup();
+    const { unmount } = await renderLoaded();
+    const box = screen.getByRole("checkbox", { name: "Four-colour deck" });
+    expect(box).not.toBeChecked();
+    expect(screen.getByTestId("cards-mock")).toHaveAttribute(
+      "data-four-colour",
+      "false",
+    );
+    await user.click(box);
+    expect(box).toBeChecked();
+    expect(screen.getByTestId("cards-mock")).toHaveAttribute(
+      "data-four-colour",
+      "true",
+    );
+    expect(localStorage.getItem(FOUR_COLOUR_KEY)).toBe("1");
+    unmount();
+
+    await renderLoaded();
+    expect(
+      screen.getByRole("checkbox", { name: "Four-colour deck" }),
+    ).toBeChecked();
+    expect(screen.getByTestId("cards-mock")).toHaveAttribute(
+      "data-four-colour",
+      "true",
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "Four-colour deck" }),
+    );
+    expect(localStorage.getItem(FOUR_COLOUR_KEY)).toBe("0");
+  });
+
+  it("reads a stored four-colour choice on mount and survives blocked storage", async () => {
+    localStorage.setItem(FOUR_COLOUR_KEY, "1");
+    const { unmount } = await renderLoaded();
+    expect(
+      screen.getByRole("checkbox", { name: "Four-colour deck" }),
+    ).toBeChecked();
+    unmount();
+
+    const user = userEvent.setup();
+    const get = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new Error("blocked");
+      });
+    const set = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("blocked");
+      });
+    try {
+      await renderLoaded();
+      const box = screen.getByRole("checkbox", { name: "Four-colour deck" });
+      expect(box).not.toBeChecked();
+      await user.click(box);
+      expect(box).toBeChecked();
+      expect(screen.getByTestId("cards-mock")).toHaveAttribute(
+        "data-four-colour",
+        "true",
+      );
+    } finally {
+      get.mockRestore();
+      set.mockRestore();
+    }
   });
 });
