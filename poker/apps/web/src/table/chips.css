@@ -1,4 +1,12 @@
-/* Chips (W7): amount labels next to bet and pot stacks (rendered through drei <Html>). */
+/* Chips (W7): amount labels next to bet and pot stacks (rendered through DomAnchor). */
+
+/* DomAnchor centres .chip-anchor on a point just right of the stacks; the pill moves right by half its own
+   width so its left edge sits there instead. */
+.chip-anchor > .chip-label {
+  display: inline-block;
+  transform: translateX(50%);
+}
+
 .chip-label {
   padding: 2px var(--space-2, 8px);
   border-radius: 999px;

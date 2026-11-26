@@ -15,8 +15,8 @@ import { useTable } from './storeContext.js';
 import type { ChipEntity } from './types.js';
 import './chips.css';
 
-export const CHIP_RADIUS = 0.11;
-export const CHIP_HEIGHT = 0.022;
+export const CHIP_RADIUS = 0.13;
+export const CHIP_HEIGHT = 0.026;
 /** Centre-to-centre distance between neighbouring stacks. */
 export const STACK_SPACING = CHIP_RADIUS * 2 + 0.02;
 /** Chips sit this far above the felt (the felt top is y = 0). */
@@ -92,8 +92,10 @@ function ChipEntityView({ entity, bigBlind, kit }: { entity: ChipEntity; bigBlin
         </group>
       ))}
       {label && (
-        <group position={[halfWidth + 0.18, 0.06, 0]}>
-          <DomAnchor zIndex={15} pointerEvents="none" className={label.prefix ? 'chip-label chip-label--pot' : 'chip-label'}>
+        // Anchored just right of the stacks; `.chip-anchor > .chip-label` shifts the pill so its left edge
+        // (not its centre) sits on that point, so it never covers the chips whatever its width.
+        <group position={[halfWidth + 0.05, 0.03, 0]}>
+          <DomAnchor zIndex={15} pointerEvents="none" className="chip-anchor">
             <ChipAmountLabel id={entity.id} testId={label.testId} prefix={label.prefix} amount={entity.amount} />
           </DomAnchor>
         </group>
@@ -102,8 +104,7 @@ function ChipEntityView({ entity, bigBlind, kit }: { entity: ChipEntity; bigBlin
   );
 }
 
-/** The DOM label text (exported for tests and the replayer; no Canvas needed). Counts up/down with a tween.
- *  The pill styling (`.chip-label`) sits on the DomAnchor wrapper around it. */
+/** The DOM label (exported for tests and the replayer; no Canvas needed). Counts up/down with a tween. */
 export function ChipAmountLabel({
   id,
   testId,
@@ -118,7 +119,7 @@ export function ChipAmountLabel({
   const shown = Math.round(useTween(amount, { id: 'amount:' + id, durationMs: 300 }));
   const money = formatPlayMoney(shown);
   return (
-    <span data-testid={testId}>
+    <span className={prefix ? 'chip-label chip-label--pot' : 'chip-label'} data-testid={testId}>
       {prefix ? (
         <>
           <span className="chip-label__prefix">{prefix}</span> {money}
