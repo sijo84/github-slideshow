@@ -178,3 +178,148 @@ export function offsetWeight(fromSeat: boolean, toSeat: boolean, f: number): num
   const b = toSeat ? 1 : 0;
   return a + (b - a) * f;
 }
+
+/** A screen rectangle in CSS px (canvas coordinates). */
+export interface ScreenBox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/** Where an opponent's pair of hole cards sits relative to the seat point (CSS px): pair centre and size. */
+export interface OpponentCardSpot {
+  cx: number;
+  cy: number;
+  cardW: number;
+  cardH: number;
+  /** Horizontal step between the two cards of the pair. */
+  fan: number;
+  pairW: number;
+  pairH: number;
+  where: string;
+}
+
+/** Seat box size (CSS px) as seatHud.css draws it, for a window width; phones add a status-chip row below. */
+export function seatBoxSize(windowWidth: number): { w: number; h: number; below: number } {
+  if (windowWidth <= PHONE_MAX_WIDTH) return { w: 72, h: 30, below: 13 };
+  return { w: clamp(windowWidth * 0.18, 66, 120), h: 104, below: 0 };
+}
+
+/** Candidate spots for an opponent's pair, in order of preference: beside the seat box on the side facing the
+ *  table centre, above it, below it, then on the far side. Never over the box (avatar, name, stack). */
+export function opponentCandidates(towardRight: boolean, windowWidth: number, faceUp: boolean): OpponentCardSpot[] {
+  const phone = windowWidth <= PHONE_MAX_WIDTH;
+  const box = seatBoxSize(windowWidth);
+  const cardW = phone ? (faceUp ? 22 : 12) : faceUp ? 34 : 26;
+  const cardH = Math.round(cardW * 1.4);
+  const fan = Math.round(cardW * (faceUp ? 0.6 : 0.5));
+  const pairW = cardW + fan;
+  const pairH = cardH;
+  const gap = 3;
+  const mk = (cx: number, cy: number, where: string): OpponentCardSpot => ({ cx, cy, cardW, cardH, fan, pairW, pairH, where });
+  const sideX = (sign: number) => sign * (box.w / 2 + gap + pairW / 2);
+  const toward = towardRight ? 1 : -1;
+  const topY = -box.h / 2 + pairH / 2;
+  const bottomY = box.h / 2 - pairH / 2;
+  const aboveY = -box.h / 2 - gap - pairH / 2;
+  const belowY = box.h / 2 + box.below + gap + pairH / 2;
+  const edgeX = box.w / 2 - pairW / 2;
+  return [
+    mk(sideX(toward), topY, 'side-top'),
+    mk(sideX(toward), 0, 'side-middle'),
+    mk(sideX(toward), bottomY, 'side-bottom'),
+    mk(toward * edgeX, aboveY, 'above-inner'),
+    mk(0, aboveY, 'above'),
+    mk(-toward * edgeX, aboveY, 'above-outer'),
+    mk(toward * edgeX, belowY, 'below-inner'),
+    mk(0, belowY, 'below'),
+    mk(-toward * edgeX, belowY, 'below-outer'),
+    mk(sideX(toward), aboveY + pairH / 2, 'side-raised'),
+    mk(sideX(-toward), topY, 'far-top'),
+    mk(sideX(-toward), 0, 'far-middle'),
+    mk(sideX(-toward), bottomY, 'far-bottom'),
+  ];
+}
+
+function overlapArea(a: ScreenBox, b: ScreenBox): number {
+  const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+  const h = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/** The first candidate (around the seat point `at`, canvas px) that stays inside the canvas and clear of every
+ *  obstacle; if none is clear, the one with the least overlap. */
+export function pickSpot(
+  at: readonly [number, number],
+  candidates: OpponentCardSpot[],
+  obstacles: ScreenBox[],
+  canvas: { width: number; height: number },
+): OpponentCardSpot {
+  let best = candidates[0]!;
+  let bestCost = Infinity;
+  for (const c of candidates) {
+    const b: ScreenBox = {
+      x0: at[0] + c.cx - c.pairW / 2,
+      y0: at[1] + c.cy - c.pairH / 2,
+      x1: at[0] + c.cx + c.pairW / 2,
+      y1: at[1] + c.cy + c.pairH / 2,
+    };
+    let cost = 0;
+    for (const o of obstacles) cost += overlapArea(b, o);
+    const outside =
+      Math.max(0, -b.x0) + Math.max(0, -b.y0) + Math.max(0, b.x1 - canvas.width) + Math.max(0, b.y1 - canvas.height);
+    cost += outside * c.pairH * 2;
+    if (cost === 0) return c;
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = c;
+    }
+  }
+  return best;
+}
+
+/**
+ * Everything on screen an opponent's cards must not cover, in canvas px: every seat box (with its chip row on
+ * phones), every bet stack with its amount label and every dealer-button spot (face down only: bets are gone
+ * by showdown), the board, the main pot with its label, and the viewer's own cards.
+ */
+export function tableObstacles(
+  project: (p: Vec3) => readonly [number, number],
+  scene: Scene,
+  windowWidth: number,
+  faceUp: boolean,
+): ScreenBox[] {
+  const phone = windowWidth <= PHONE_MAX_WIDTH;
+  const box = seatBoxSize(windowWidth);
+  const chipR = phone ? 7 : 12;
+  const label = { w: 50, h: 21 };
+  const out: ScreenBox[] = [];
+  for (let s = 0; s < scene.maxSeats; s++) {
+    const [x, y] = project(scene.seatPosition(s));
+    out.push({ x0: x - box.w / 2, y0: y - box.h / 2, x1: x + box.w / 2, y1: y + box.h / 2 + box.below });
+    if (!faceUp) {
+      const [bx, by] = project(scene.betPosition(s));
+      out.push({ x0: bx - chipR, y0: by - label.h / 2, x1: bx + chipR + 4 + label.w, y1: by + label.h / 2 });
+    }
+    const [ux, uy] = project(scene.buttonPosition(s));
+    out.push({ x0: ux - 10, y0: uy - 10, x1: ux + 10, y1: uy + 10 });
+  }
+  const boardScale = windowWidth <= 600 ? 1.55 : 1;
+  for (let i = 0; i < 5; i++) {
+    const [bx, , bz] = scene.boardPosition(i);
+    const [x0, y0] = project([bx - 0.27 * boardScale, 0.3, bz]);
+    const [x1, y1] = project([bx + 0.27 * boardScale, 0, bz + 0.72 * boardScale]);
+    out.push({ x0, y0, x1, y1 });
+  }
+  const [px, py] = project(scene.potPosition(0));
+  out.push({ x0: px - 14, y0: py - 11, x1: px + 14 + 80, y1: py + 11 });
+  if (scene.mySeat !== null) {
+    const [mx, my] = project(scene.seatPosition(scene.mySeat));
+    for (const i of [0, 1] as const) {
+      const l = holeCardLayout(true, windowWidth, i);
+      out.push({ x0: mx + l.dx - l.width / 2 - 4, y0: my + l.dy - l.height / 2 - 4, x1: mx + l.dx + l.width / 2 + 4, y1: my + l.dy + l.height / 2 + 4 });
+    }
+  }
+  return out;
+}

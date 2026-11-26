@@ -88,7 +88,10 @@
    bar sits in the flow right under it, so it never covers the bottom seat's HUD. The width is capped so canvas +
    action bar stay on screen. These rules re-flow W5's .table3d root and W9's .action-bar only inside this stage. */
 .table-stage {
-  --table-chrome: 260px; /* shell + page header + action bar + paddings, kept off the canvas height */
+  /* Height reserved for the action bar row: the tallest state (my turn with bet sizing) at this width. */
+  --table-bar-h: 148px;
+  /* shell + page header + action bar row + paddings, kept off the canvas height */
+  --table-chrome: calc(var(--table-bar-h) + 152px);
   position: relative;
   justify-self: center;
   width: min(100%, calc((100dvh - var(--table-chrome)) * 16 / 9));
@@ -119,6 +122,13 @@
 .table-stage .table3d-overlay {
   position: relative;
   inset: auto;
+}
+/* While the action bar is shown (I am seated) its row keeps one stable height in every state (my turn, waiting
+   with pre-actions, between hands), so the page does not jump. The bar hangs from the top of the row: when it is
+   not my turn it is short and W9 lowers it by 28 px, which stays inside the reserved row instead of being cut
+   off by the stage. A state taller than the reserve grows the row rather than clipping. */
+.table-stage .table3d-overlay:has(.action-bar) {
+  min-height: var(--table-bar-h);
 }
 .table-stage .action-bar {
   position: relative;
@@ -271,6 +281,9 @@
   }
 }
 @media (max-width: 600px) {
+  .table-stage {
+    --table-bar-h: 252px;
+  }
   /* The shell header wraps to two rows on phones: the slide-over covers it instead of hiding under it. */
   .table-host-layer {
     top: 0;
