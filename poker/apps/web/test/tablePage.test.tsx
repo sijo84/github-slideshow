@@ -442,7 +442,8 @@ describe("TablePage", () => {
     await user.click(screen.getByRole("button", { name: "Stay" }));
     expect(emitted("table:leave")).toEqual([]);
     await user.click(screen.getByRole("button", { name: "Leave table" }));
-    await user.click(screen.getByRole("button", { name: "Yes, leave" }));
+    const confirm = screen.getByRole("group", { name: "Leave table?" });
+    await user.click(within(confirm).getByRole("button", { name: "Leave now" }));
     expect(emitted("table:leave")).toEqual([{ gameId: GAME_ID }]);
   });
 

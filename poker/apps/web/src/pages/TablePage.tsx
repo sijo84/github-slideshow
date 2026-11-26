@@ -230,9 +230,9 @@ function TableScreen({
                 <span
                   className="table-confirm"
                   role="group"
-                  aria-label="Leave the table?"
+                  aria-label="Leave table?"
                 >
-                  <span>Leave the table?</span>
+                  <span aria-hidden="true">Leave table?</span>
                   <button
                     type="button"
                     className="btn btn-danger btn-sm"
@@ -241,7 +241,7 @@ function TableScreen({
                       setConfirmLeave(false);
                     }}
                   >
-                    Yes, leave
+                    Leave now
                   </button>
                   <button
                     type="button"

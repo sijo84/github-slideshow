@@ -259,14 +259,70 @@
   user-select: none;
 }
 
+/* Phones: a compact two-line card (avatar on the left, name over stack on the right, ~30px tall) so nine seats
+   around a 390px-wide table do not overlap. Status chips and the equity badge hang just below the card. */
 @media (max-width: 480px) {
   .seat-hud {
-    padding: 3px 3px 4px;
-    gap: 1px;
+    --seat-w: 72px;
+    --avatar: 24px;
+    display: grid;
+    grid-template-columns: var(--avatar) minmax(0, 1fr);
+    column-gap: 3px;
+    row-gap: 0;
+    align-items: start;
+    padding: 2px 3px;
+    font-size: 10px;
+    line-height: 12px;
+    text-align: left;
+    border-radius: var(--radius-sm);
+  }
+  .seat-hud__who {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 3px;
+  }
+  .seat-hud__name {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .seat-hud__stack {
+    grid-column: 2;
+    grid-row: 1;
+    margin-top: 12px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .seat-hud__chips {
+    position: absolute;
+    top: calc(100% + 1px);
+    left: 50%;
+    transform: translateX(-50%);
+    flex-wrap: nowrap;
+    z-index: 1;
   }
   .seat-hud__chip,
   .seat-hud__equity {
     padding: 0 3px;
+    font-size: 9px;
+    line-height: 12px;
+  }
+  .seat-hud__turn {
+    grid-column: 1 / -1;
+    text-align: center;
+  }
+  .seat-hud--empty {
+    display: flex;
+    padding: 0;
+  }
+  .turn-ring {
+    inset: -3px;
+  }
+  .turn-ring__bank {
+    font-size: 8px;
   }
   .dealer-button {
     width: 16px;

@@ -84,36 +84,50 @@
   gap: var(--space-3);
   min-width: 0;
 }
+/* The stage: the canvas keeps the table's shape (16:9 on desktop, 4:3 on phones, width-driven) and the action
+   bar sits in the flow right under it, so it never covers the bottom seat's HUD. The width is capped so canvas +
+   action bar stay on screen. These rules re-flow W5's .table3d root and W9's .action-bar only inside this stage. */
 .table-stage {
+  --table-chrome: 260px; /* shell + page header + action bar + paddings, kept off the canvas height */
   position: relative;
+  justify-self: center;
+  width: min(100%, calc((100dvh - var(--table-chrome)) * 16 / 9));
   min-width: 0;
-  height: min(72vh, 720px);
-  min-height: 360px;
   border-radius: var(--radius-lg);
   overflow: hidden;
-  background: radial-gradient(
-    ellipse at center,
-    var(--felt-deep) 0%,
-    var(--bg) 75%
-  );
+  background: var(--bg);
 }
-.table-stage > [data-testid="table-3d"] {
-  position: absolute;
-  inset: 0;
-}
-
-/* The overlay sits on top of the canvas; only its controls take pointer events. */
-.table-overlay {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
+.table-stage .table3d {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  height: auto;
+  min-height: 0;
 }
+.table-stage .table3d-canvas {
+  position: relative !important;
+  inset: auto;
+  flex: none;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+/* Without WebGL there is no canvas: keep the same footprint so the page does not jump. */
+.table-stage .table3d[data-webgl="false"]::before {
+  content: "";
+  display: block;
+  aspect-ratio: 16 / 9;
+}
+.table-stage .table3d-overlay {
+  position: relative;
+  inset: auto;
+}
+.table-stage .action-bar {
+  position: relative;
+}
+
+/* Overlay wrappers take no pointer events themselves (W5's rule re-enables them on the controls). */
+.table-overlay,
 .table-overlay-bottom {
-  pointer-events: auto;
-  padding: var(--space-2);
+  pointer-events: none;
 }
 
 .table-side {
@@ -252,8 +266,11 @@
   .table-main {
     grid-template-columns: minmax(0, 1fr);
   }
-  .table-stage {
-    height: min(62vh, 560px);
+}
+@media (max-width: 600px) {
+  .table-stage .table3d-canvas,
+  .table-stage .table3d[data-webgl="false"]::before {
+    aspect-ratio: 4 / 3;
   }
 }
 @media (max-width: 480px) {
@@ -262,8 +279,5 @@
   }
   .table-buttons {
     margin-left: 0;
-  }
-  .table-stage {
-    min-height: 320px;
   }
 }
