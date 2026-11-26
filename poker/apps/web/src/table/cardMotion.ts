@@ -97,3 +97,83 @@ export function showsFace(entity: CardEntity): boolean {
   if (entity.card === null) return false;
   return entity.faceUp || entity.place.at === 'board';
 }
+
+// ---------------------------------------------------------------------------------------------------------
+// Hole cards on screen (DOM, drawn above the seat HUDs; see Cards.tsx)
+
+/** Width at which the seat HUD switches to its compact phone layout (seatHud.css `max-width: 480px`). */
+export const PHONE_MAX_WIDTH = 480;
+
+/** The seat a hole-card id belongs to (`card:<handId>:<seat>:<0|1>`), or null for a board card. */
+export function holeSeatOf(id: string): number | null {
+  const parts = id.split(':');
+  if (parts.length < 4) return null;
+  const seat = parts[parts.length - 2]!;
+  return /^\d+$/.test(seat) ? Number(seat) : null;
+}
+
+/** Index (0 or 1) of a hole card from its id. */
+export function holeIndexOf(id: string): 0 | 1 {
+  return id.endsWith(':1') ? 1 : 0;
+}
+
+/** Screen-space layout of one hole card relative to its seat point (the HUD centre), in CSS px. */
+export interface HoleCardLayout {
+  /** Centre of this card relative to the seat point, at rest. */
+  dx: number;
+  dy: number;
+  width: number;
+  height: number;
+  /** Fan rotation in degrees. */
+  rotateDeg: number;
+  /** Scale once the card is face up (opponents' cards grow at showdown so they can be read). */
+  faceUpScale: number;
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v));
+}
+
+/**
+ * Where a hole card sits on screen, for the viewer's own seat (`mine`) or an opponent's, at a window width.
+ * - Viewer, desktop: a fanned pair left of the HUD (the button sits on its right), vertically centred on it.
+ * - Viewer, phone: a fanned pair below-left of the compact HUD, where the canvas has free room.
+ * - Opponent: a small fanned pair over the top edge of the HUD (above the avatar), mostly above it; face up at
+ *   showdown it grows so rank and suit can be read.
+ */
+export function holeCardLayout(mine: boolean, windowWidth: number, index: 0 | 1): HoleCardLayout {
+  const phone = windowWidth <= PHONE_MAX_WIDTH;
+  const side = index === 0 ? -1 : 1;
+  if (mine) {
+    if (phone) {
+      const width = 32;
+      const fan = 20;
+      return { dx: -74 + (side * fan) / 2, dy: 40, width, height: 45, rotateDeg: side * 4, faceUpScale: 1 };
+    }
+    const hudW = clamp(windowWidth * 0.18, 66, 120);
+    const width = Math.round(clamp(windowWidth * 0.046, 40, 60));
+    const fan = Math.round(width * 0.62);
+    const pairW = width + fan;
+    const cx = -(hudW / 2 + 10 + pairW / 2);
+    return { dx: cx + (side * fan) / 2, dy: 6, width, height: Math.round(width * 1.4), rotateDeg: side * 5, faceUpScale: 1 };
+  }
+  if (phone) {
+    const width = 14;
+    const fan = 8;
+    // Over the compact HUD's avatar (left part), half above the top edge (the HUD is ~30 px tall).
+    return { dx: -21 + (side * fan) / 2, dy: -19, width, height: 20, rotateDeg: side * 6, faceUpScale: 1.7 };
+  }
+  const width = Math.round(clamp(windowWidth * 0.026, 24, 32));
+  const height = Math.round(width * 1.4);
+  const fan = Math.round(width * 0.45);
+  // The desktop HUD is ~100 px tall: the pair overlaps its top edge by ~30% of a card.
+  return { dx: (side * fan) / 2, dy: -50 - height * 0.2, width, height, rotateDeg: side * 6, faceUpScale: 1.4 };
+}
+
+/** How much of a hole card's screen offset applies: 1 at a seat, 0 elsewhere (deck, muck), interpolated over
+ *  the travel fraction so the card glides from the anchor point to its spot beside the HUD and back. */
+export function offsetWeight(fromSeat: boolean, toSeat: boolean, f: number): number {
+  const a = fromSeat ? 1 : 0;
+  const b = toSeat ? 1 : 0;
+  return a + (b - a) * f;
+}

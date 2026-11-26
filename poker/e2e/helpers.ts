@@ -217,9 +217,12 @@ export async function pageWithTurn(pages: Page[]): Promise<number> {
   return -1;
 }
 
-/** Parses play dollars like `$1,250` (or `1,250`) into 1250. */
+/** Parses play dollars into a number: `$1,250` → 1250, `Pot $20` → 20, `Side pot $40` → 40 (the `$` amount wins;
+ *  text without a `$` falls back to its digits). */
 export function parseMoney(text: string | null): number {
-  const digits = (text ?? '').replace(/[^0-9]/g, '');
+  const t = text ?? '';
+  const dollar = /\$\s*([\d,]+)/.exec(t);
+  const digits = (dollar ? dollar[1]! : t).replace(/[^0-9]/g, '');
   if (digits === '') throw new Error(`not an amount: ${JSON.stringify(text)}`);
   return Number(digits);
 }
@@ -228,7 +231,7 @@ export function parseMoney(text: string | null): number {
 export async function chipsOnTable(page: Page): Promise<{ stacks: number; total: number }> {
   const read = async (prefix: string): Promise<number> => {
     const texts = await page.locator(`[data-testid^="${prefix}"]`).allTextContents();
-    return texts.filter((t) => /\d/.test(t)).reduce((sum, t) => sum + parseMoney(t), 0);
+    return texts.filter((t) => /\$\s*\d/.test(t) || /^\s*[\d,]+\s*$/.test(t)).reduce((sum, t) => sum + parseMoney(t), 0);
   };
   const stacks = await read('stack-');
   const bets = await read('bet-');
@@ -290,7 +293,7 @@ export const TRACE_SLOPE_FACTOR = 1.25;
 
 export interface TraceViolation {
   series: string;
-  /** Index of the later sample within its series. */
+  /** Index of the later sample within its series. `prev` is the value it was compared with. */
   index: number;
   t: number;
   dtMs: number;
@@ -325,14 +328,18 @@ function distance(a: TraceValue, b: TraceValue): number {
 }
 
 /**
- * The I-11 trace check. Samples are grouped by series id (tween ids and `obj:<id>`), kept in recording order.
- * For every pair of consecutive samples of a series whose value changed:
+ * The I-11 trace check, with the lead's checkpoint 8 rulings. Samples are grouped by series id (tween ids and
+ * `obj:<id>`), kept in recording order. For every pair of consecutive samples of a series whose value changed:
  *  - the later sample must have `active: true` (a change with no tween driving it is a jump);
  *  - |Δ| ≤ 1.25 × EASE_PEAK_SLOPE[ease] × (|to − from| × Δt / durationMs) + ε, with `from`/`to`/`durationMs`/`ease`
  *    read from the later sample (so a pair spanning the end of one tween and the start of the next is judged by
  *    the later one), Δt the real time between the two samples, |·| the Euclidean length for vectors, and
  *    ε = 0.02 for vectors, 1 for scalars.
- * A zero-duration tween gets no slope allowance (bound = ε). An unknown ease name is a violation.
+ * `obj:*` series are the continuity guard and are checked strictly as above. On plain tween series, the first
+ * sample of a new tween under the same id (different from/to/durationMs than the previous sample) is compared
+ * with its own `from` instead of the previous value, with Δt capped at the tween's duration. Zero-duration tweens
+ * (timers, instant sets) are skipped, and the director's `step:*` timer series are not checked at all.
+ * An unknown ease name is a violation.
  */
 export function checkTrace(samples: TraceSample[]): TraceViolation[] {
   const series = new Map<string, TraceSample[]>();
@@ -343,20 +350,34 @@ export function checkTrace(samples: TraceSample[]): TraceViolation[] {
   }
   const violations: TraceViolation[] = [];
   for (const [id, list] of series) {
+    if (id.startsWith('step:')) continue; // the director's timers
+    const isObj = id.startsWith('obj:');
     for (let i = 1; i < list.length; i++) {
       const prev = list[i - 1]!;
       const cur = list[i]!;
-      const delta = distance(prev.value, cur.value);
+      const newTween =
+        !isObj &&
+        cur.from !== undefined &&
+        cur.to !== undefined &&
+        (prev.from === undefined ||
+          prev.to === undefined ||
+          distance(prev.from, cur.from) !== 0 ||
+          distance(prev.to, cur.to) !== 0 ||
+          prev.durationMs !== cur.durationMs);
+      const reference = newTween ? cur.from! : prev.value;
+      const delta = distance(reference, cur.value);
       if (delta === 0) continue;
+      if (cur.active === true && cur.durationMs === 0) continue; // zero-duration tween: not a motion
       const eps = typeof cur.value === 'number' ? TRACE_EPSILON_SCALAR : TRACE_EPSILON_VECTOR;
-      const dtMs = cur.t - prev.t;
+      const rawDt = cur.t - prev.t;
+      const dtMs = newTween && cur.durationMs !== undefined ? Math.min(rawDt, cur.durationMs) : rawDt;
       const base = {
         series: id,
         index: i,
         t: cur.t,
         dtMs,
         delta,
-        prev: prev.value,
+        prev: reference,
         value: cur.value,
         tween: cur.tween,
         ease: cur.ease,
@@ -376,10 +397,13 @@ export function checkTrace(samples: TraceSample[]): TraceViolation[] {
         continue;
       }
       const span = distance(cur.from, cur.to);
-      const allowance = cur.durationMs > 0 ? TRACE_SLOPE_FACTOR * slope * ((span * Math.max(0, dtMs)) / cur.durationMs) : 0;
-      const bound = allowance + eps;
+      const bound = TRACE_SLOPE_FACTOR * slope * ((span * Math.max(0, dtMs)) / cur.durationMs) + eps;
       if (!(delta <= bound)) {
-        violations.push({ ...base, bound, reason: cur.durationMs > 0 ? 'step larger than the curve allows' : 'zero-duration tween' });
+        violations.push({
+          ...base,
+          bound,
+          reason: newTween ? 'first sample of a new tween too far from its from' : 'step larger than the curve allows',
+        });
       }
     }
   }

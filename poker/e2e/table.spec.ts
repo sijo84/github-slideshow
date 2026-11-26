@@ -77,13 +77,11 @@ test('three players play a hand', async ({ browser }) => {
 
   // Before the start: Ben sits, leaves, and sits elsewhere (F5: seats must glide, checked through the trace).
   await sitDown(ben.page, 1, 1000, ben.name);
-  ben.page.once('dialog', (d) => void d.accept()); // in case the confirmation is a native confirm()
   await ben.page.getByRole('button', { name: 'Leave table', exact: true }).click();
-  const confirm = ben.page.getByRole('dialog').getByRole('button', { name: /^Leave/ });
-  const sitButton = ben.page.getByRole('button', { name: 'Sit at seat 2', exact: true });
-  await expect(confirm.or(sitButton).first()).toBeVisible();
-  if (await confirm.isVisible()) await confirm.click();
-  await expect(sitButton).toBeVisible();
+  const confirmLeave = ben.page.getByRole('group', { name: 'Leave table?', exact: true });
+  await expect(confirmLeave.getByRole('button', { name: 'Stay', exact: true })).toBeVisible();
+  await confirmLeave.getByRole('button', { name: 'Leave now', exact: true }).click();
+  await expect(ben.page.getByRole('button', { name: 'Sit at seat 2', exact: true })).toBeVisible();
   await expect(ben.page.locator('[data-me="true"]')).toHaveCount(0);
 
   // Ana opens and closes the host panel.
