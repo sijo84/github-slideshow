@@ -204,9 +204,9 @@ describe('cardPlacePosition / chipPlacePosition', () => {
     expect(cardPlacePosition(scene, { at: 'deck' })).toEqual([0, 0.01, -3]);
     expect(cardPlacePosition(scene, { at: 'muck' })).toEqual([3, 0.01, -3]);
     expect(cardPlacePosition(scene, { at: 'board', index: 2 })).toEqual([1, 0.01, -0.5]);
-    // seat 1 at [10, 0, 20]; 15% toward the centre → [8.5, _, 17]; ±0.22 on x; y 0.02
-    close(cardPlacePosition(scene, { at: 'seat', seat: 1, index: 0 }), [8.5 - 0.22, 0.02, 17]);
-    close(cardPlacePosition(scene, { at: 'seat', seat: 1, index: 1 }), [8.5 + 0.22, 0.02, 17]);
+    // seat 1 at [10, 0, 20]; hole cards are anchored at the seat point (Cards.tsx offsets them on screen); y 0.02
+    close(cardPlacePosition(scene, { at: 'seat', seat: 1, index: 0 }), [10, 0.02, 20]);
+    close(cardPlacePosition(scene, { at: 'seat', seat: 1, index: 1 }), [10, 0.02, 20]);
   });
 
   it('places chips', () => {

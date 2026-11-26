@@ -28,11 +28,17 @@ export function useScene(): Scene {
   return scene;
 }
 
-/** Half the gap between a seat's two hole cards, on x. */
-export const HOLE_CARD_OFFSET_X = 0.22;
-/** How far a seat's hole cards sit from the seat toward the table centre (fraction of the distance). */
-export const HOLE_CARD_INSET = 0.15;
-/** Height of hole cards above the felt. */
+/**
+ * Hole cards are anchored at their seat point (W6, lead decision at checkpoint 8): the seat HUD is DOM drawn on
+ * top of the canvas, so `Cards.tsx` draws hole cards as DOM too, above the HUDs, at a screen-space offset from
+ * this anchor (beside the viewer's HUD, over the top edge of an opponent's). These constants shift the anchor
+ * itself and are 0.
+ */
+/** Half the gap between a seat's two hole-card anchors, on x. */
+export const HOLE_CARD_OFFSET_X = 0;
+/** How far a seat's hole-card anchor sits from the seat toward the table centre (fraction of the distance). */
+export const HOLE_CARD_INSET = 0;
+/** Height of the hole-card anchor above the felt. */
 export const HOLE_CARD_Y = 0.02;
 
 export function cardPlacePosition(scene: Scene, place: CardPlace): Vec3 {
@@ -45,7 +51,7 @@ export function cardPlacePosition(scene: Scene, place: CardPlace): Vec3 {
       return scene.muckPosition;
     case 'seat': {
       const [x, , z] = scene.seatPosition(place.seat);
-      const k = 1 - HOLE_CARD_INSET; // 15% of the way toward [0, 0, 0]
+      const k = 1 - HOLE_CARD_INSET; // HOLE_CARD_INSET of the way toward [0, 0, 0]
       const dx = place.index === 0 ? -HOLE_CARD_OFFSET_X : HOLE_CARD_OFFSET_X;
       return [x * k + dx, HOLE_CARD_Y, z * k];
     }
