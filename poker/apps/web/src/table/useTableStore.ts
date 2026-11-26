@@ -113,7 +113,17 @@ export function createTableStore(): StoreApi<TableState> {
         const s = get();
         const busy = s.queue.length > 0 || s.playing !== null || liveHand;
         const mode = busy ? 'keepAll' : s.handId !== null && s.cards.length > 0 ? 'keepCards' : 'server';
-        set({ seats: mergeSeats(s.seats, seats, mode) });
+        const patch: Partial<TableData> = { seats: mergeSeats(s.seats, seats, mode) };
+        if (s.myPlayerId !== null) {
+          const mySeat = seats.find((v) => v.playerId === s.myPlayerId)?.seat ?? null;
+          patch.mySeat = mySeat;
+          if (mySeat === null && s.mySeat !== null) {
+            patch.myHole = [];
+            patch.legal = null;
+            patch.myEquity = null;
+          }
+        }
+        set(patch);
       },
 
       applyClock(c) {
@@ -296,9 +306,15 @@ export function useDirector(store?: StoreApi<TableState>): void {
 // ---------------------------------------------------------------------------------------------------------
 // Socket wiring
 
-/** Joins `gameId` and wires every table socket event to `store`. Returns the disconnect function. */
-export function connectTable(gameId: string, store: StoreApi<TableState> = tableStore): () => void {
+/** Joins `gameId` and wires every table socket event to `store`. `myPlayerId` (the signed-in user) lets
+ *  `applySeats` find my seat when only `table:seats` tells me I sat down. Returns the disconnect function. */
+export function connectTable(
+  gameId: string,
+  store: StoreApi<TableState> = tableStore,
+  myPlayerId: string | null = null,
+): () => void {
   const socket = getSocket();
+  store.setState({ myPlayerId });
   let alive = true;
   const st = () => store.getState();
   const mine = (p: { gameId: string }): boolean => alive && p.gameId === gameId;

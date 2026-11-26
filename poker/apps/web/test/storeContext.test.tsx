@@ -39,6 +39,7 @@ describe('initialTableState', () => {
       deadline: null,
       timeBank: null,
       mySeat: null,
+      myPlayerId: null,
       myHole: [],
       myEquity: null,
       allInEquity: null,

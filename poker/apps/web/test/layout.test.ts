@@ -147,13 +147,16 @@ describe('bets, button, board, pots', () => {
 });
 
 describe('cameraFor', () => {
-  it('uses fov 40, looks at the centre and tilts about 35°', () => {
+  it('uses fov 40, looks at the table and tilts about 35°', () => {
     const c = cameraFor(1.6);
     expect(c.fov).toBe(40);
-    expect(c.lookAt).toEqual([0, 0, 0]);
+    // Looks at the table centre, nudged along z by a little so the table sits centred on screen.
+    expect(c.lookAt[0]).toBe(0);
+    expect(c.lookAt[1]).toBe(0);
+    expect(Math.abs(c.lookAt[2])).toBeLessThan(0.8);
     const [x, y, z] = c.position;
     expect(x).toBe(0);
-    const tiltDeg = (Math.atan2(z, y) * 180) / Math.PI;
+    const tiltDeg = (Math.atan2(z - c.lookAt[2], y) * 180) / Math.PI;
     expect(tiltDeg).toBeGreaterThan(30);
     expect(tiltDeg).toBeLessThan(40);
   });
@@ -165,27 +168,67 @@ describe('cameraFor', () => {
     expect(len(0.4)).toBeGreaterThan(len(390 / 700));
   });
 
+  /** Projects with a real three.js camera built from `cameraFor`; returns CSS px in a w×h view. */
+  const projector = (w: number, h: number, vp?: Parameters<typeof cameraFor>[1]) => {
+    const c = cameraFor(w / h, vp);
+    const camera = new PerspectiveCamera(c.fov, w / h, 0.1, 500);
+    camera.position.set(...c.position);
+    camera.lookAt(new Vector3(...c.lookAt));
+    camera.updateMatrixWorld();
+    camera.updateProjectionMatrix();
+    return (p: Vec3) => {
+      const v = new Vector3(...p).project(camera);
+      expect(v.z).toBeLessThan(1);
+      return { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h, ndc: v };
+    };
+  };
+
   for (const [label, w, h] of [
     ['390×700 portrait', 390, 700],
     ['390×844 portrait', 390, 844],
     ['1280×800', 1280, 800],
     ['1920×1080', 1920, 1080],
   ] as const) {
-    it(`keeps every seat of 9 in view at ${label}`, () => {
-      const c = cameraFor(w / h);
-      const camera = new PerspectiveCamera(c.fov, w / h, 0.1, 500);
-      camera.position.set(...c.position);
-      camera.lookAt(new Vector3(...c.lookAt));
-      camera.updateMatrixWorld();
-      camera.updateProjectionMatrix();
-      for (const me of [null, 0, 4, 8]) {
+    it(`keeps every seat of 9 in view at ${label} (aspect only)`, () => {
+      const project = projector(w, h);
+      for (const me of [null, 0, 4, 8])
         for (let s = 0; s < 9; s++) {
-          const v = new Vector3(...seatPosition(s, 9, me)).project(camera);
-          expect(Math.abs(v.x)).toBeLessThan(0.9);
-          expect(Math.abs(v.y)).toBeLessThan(0.9);
-          expect(v.z).toBeLessThan(1);
+          const { ndc } = project(seatPosition(s, 9, me));
+          expect(Math.abs(ndc.x)).toBeLessThan(0.97);
+          expect(Math.abs(ndc.y)).toBeLessThan(0.97);
         }
-      }
+    });
+  }
+
+  // Real stage sizes from the table page: desktop 1280×800 and phone 390×844, with the HUD sizes seatHud.css gives.
+  for (const [label, w, h, hudW, hudH] of [
+    ['desktop stage 912×576', 912, 576, 120, 62],
+    ['phone stage 374×523', 374, 523, 70, 36],
+    ['portrait 390×700', 390, 700, 70, 36],
+    ['wide 1600×600', 1600, 600, 120, 62],
+  ] as const) {
+    it(`keeps every seat HUD of 9 inside the ${label} and frames the table tightly`, () => {
+      const project = projector(w, h, { width: w, height: h, hudWidth: hudW, hudHeight: hudH });
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (const n of [6, 8, 9])
+        for (const me of [null, ...Array.from({ length: n }, (_, i) => i)])
+          for (let s = 0; s < n; s++) {
+            const { x, y } = project(seatPosition(s, n, me));
+            minX = Math.min(minX, x - hudW / 2);
+            maxX = Math.max(maxX, x + hudW / 2);
+            minY = Math.min(minY, y - hudH / 2);
+            maxY = Math.max(maxY, y + hudH / 2);
+          }
+      expect(minX).toBeGreaterThanOrEqual(0);
+      expect(maxX).toBeLessThanOrEqual(w);
+      expect(minY).toBeGreaterThanOrEqual(0);
+      expect(maxY).toBeLessThanOrEqual(h);
+      // Tight: the seats with their HUDs span nearly the full width or the full height of the view.
+      const fill = Math.max((maxX - minX) / w, (maxY - minY) / h);
+      expect(fill).toBeGreaterThan(0.85);
     });
   }
 });

@@ -145,59 +145,124 @@ export function makeScene(maxSeats: number, mySeat: SeatIndex | null): Scene {
   };
 }
 
-/** World-space box the camera must keep in view: the seats plus room for their HUDs (which are DOM, drawn
- *  at a fixed pixel size around the seat point, mostly toward the viewer). */
-const FIT_HALF_X = SEAT_RX + 0.9;
-const FIT_NEAR_Z = SEAT_RZ + 0.75;
-const FIT_FAR_Z = -(SEAT_RZ + 0.55);
-/** The box must project inside ±FIT_NDC. */
-const FIT_NDC = 0.95;
-
-const FIT_POINTS: Vec3[] = [
-  [FIT_HALF_X, 0, FIT_NEAR_Z],
-  [-FIT_HALF_X, 0, FIT_NEAR_Z],
-  [FIT_HALF_X, 0, FIT_FAR_Z],
-  [-FIT_HALF_X, 0, FIT_FAR_Z],
-  [0, 0, FIT_NEAR_Z],
-  [0, 0, FIT_FAR_Z],
-  [FIT_HALF_X, 0, 0],
-  [-FIT_HALF_X, 0, 0],
-];
-
-/** Largest |NDC| of the fit points for a camera at `distance` (looking at the origin, tilted CAMERA_TILT_DEG). */
-function worstNdc(distance: number, aspect: number): number {
-  const t = (CAMERA_TILT_DEG * Math.PI) / 180;
-  // Camera direction from the target: D = (0, cos t, sin t); camera up: U = (0, sin t, −cos t); right = +x.
-  const dy = Math.cos(t);
-  const dz = Math.sin(t);
-  const tanHalf = Math.tan((CAMERA_FOV * Math.PI) / 360);
-  let worst = 0;
-  for (const [x, y, z] of FIT_POINTS) {
-    const depth = distance - (y * dy + z * dz);
-    if (depth <= 0.01) return Infinity;
-    const up = y * dz - z * dy;
-    const nx = x / depth / (tanHalf * aspect);
-    const ny = up / depth / tanHalf;
-    worst = Math.max(worst, Math.abs(nx), Math.abs(ny));
-  }
-  return worst;
+/** Size of the view the camera frames, in CSS px, and of the seat HUDs drawn (at a fixed pixel size) centred on
+ *  each seat point. */
+export interface CameraViewport {
+  width: number;
+  height: number;
+  hudWidth?: number;
+  hudHeight?: number;
 }
 
-/** The camera for a viewport aspect ratio (width / height): ~35° tilt, fov 40, looking at the table centre,
- *  as close as it can be while the seats and their HUDs still fit. Narrower viewports move it back. */
-export function cameraFor(aspect: number): { position: Vec3; fov: number; lookAt: Vec3 } {
-  const a = Number.isFinite(aspect) && aspect > 0.05 ? aspect : 1;
+/** Seat HUD size (CSS px) assumed when the caller does not say (seatHud.css: clamp(66px, 18vw, 120px) wide). */
+export function hudSizeFor(windowWidth: number): { hudWidth: number; hudHeight: number } {
+  const w = Math.min(120, Math.max(66, windowWidth * 0.18));
+  return { hudWidth: w, hudHeight: Math.round(w * 0.52) };
+}
+
+/** Free space (CSS px) kept between a HUD or the rail and the edge of the view. */
+const VIEW_PAD_PX = 8;
+/** Outer reach of the rail including its bevel (Felt.tsx), which must stay in view too. */
+const RAIL_REACH_X = RIM_RX + 0.12;
+const RAIL_REACH_Z = RIM_RZ + 0.12;
+
+interface FitPoint {
+  p: Vec3;
+  /** Allowed |NDC| on x and y. */
+  lx: number;
+  ly: number;
+}
+
+function fitPoints(vp: Required<CameraViewport>): FitPoint[] {
+  const halfW = vp.width / 2;
+  const halfH = vp.height / 2;
+  const hudLx = 1 - (vp.hudWidth / 2 + VIEW_PAD_PX) / halfW;
+  const hudLy = 1 - (vp.hudHeight / 2 + VIEW_PAD_PX) / halfH;
+  const railLx = 1 - VIEW_PAD_PX / halfW;
+  const railLy = 1 - VIEW_PAD_PX / halfH;
+  const pts: FitPoint[] = [];
+  const steps = 72; // seats can sit at any angle (2..9 seats, any viewer), so check the whole ellipse
+  for (let i = 0; i < steps; i++) {
+    const a = (2 * Math.PI * i) / steps;
+    pts.push({ p: [SEAT_RX * Math.sin(a), 0, SEAT_RZ * Math.cos(a)], lx: hudLx, ly: hudLy });
+    pts.push({ p: [RAIL_REACH_X * Math.sin(a), 0.24, RAIL_REACH_Z * Math.cos(a)], lx: railLx, ly: railLy });
+  }
+  return pts;
+}
+
+/** Projects a world point for a camera tilted CAMERA_TILT_DEG, `distance` from the target [0, 0, tz]. */
+function project(p: Vec3, distance: number, tz: number, aspect: number): { nx: number; ny: number } | null {
+  const t = (CAMERA_TILT_DEG * Math.PI) / 180;
+  // Camera direction from the target: D = (0, cos t, sin t); camera up: U = (0, sin t, −cos t); right = +x.
+  const cos = Math.cos(t);
+  const sin = Math.sin(t);
+  const tanHalf = Math.tan((CAMERA_FOV * Math.PI) / 360);
+  const qy = p[1];
+  const qz = p[2] - tz;
+  const depth = distance - (qy * cos + qz * sin);
+  if (depth <= 0.05) return null;
+  return { nx: p[0] / depth / (tanHalf * aspect), ny: (qy * sin - qz * cos) / depth / tanHalf };
+}
+
+/** Smallest slack (limit − |NDC|) over the fit points; negative when something is outside. Also the top and
+ *  bottom slack, to centre the table vertically. */
+function slack(pts: FitPoint[], distance: number, tz: number, aspect: number): { min: number; top: number; bottom: number } {
+  let min = Infinity;
+  let top = Infinity;
+  let bottom = Infinity;
+  for (const { p, lx, ly } of pts) {
+    const q = project(p, distance, tz, aspect);
+    if (!q) return { min: -Infinity, top: -Infinity, bottom: -Infinity };
+    top = Math.min(top, ly - q.ny);
+    bottom = Math.min(bottom, ly + q.ny);
+    min = Math.min(min, lx - Math.abs(q.nx), top, bottom);
+  }
+  return { min, top, bottom };
+}
+
+function fitDistance(pts: FitPoint[], tz: number, aspect: number): number {
   let lo = 2;
   let hi = 400;
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 50; i++) {
     const mid = (lo + hi) / 2;
-    if (worstNdc(mid, a) > FIT_NDC) lo = mid;
+    if (slack(pts, mid, tz, aspect).min < 0) lo = mid;
     else hi = mid;
   }
+  return hi;
+}
+
+/**
+ * The camera for a view of `aspect` (width / height): ~35° tilt, fov 40, looking at the table (the target is
+ * moved along z by at most a little so the table sits centred on screen, since the near side projects larger),
+ * as close as it can be while every seat HUD and the rail stay inside the view. Narrower views move it back.
+ * `viewport` gives the view and HUD sizes in CSS px; without it a 600 px tall view with 120×62 px HUDs is assumed.
+ */
+export function cameraFor(aspect: number, viewport?: CameraViewport): { position: Vec3; fov: number; lookAt: Vec3 } {
+  const a = Number.isFinite(aspect) && aspect > 0.05 ? aspect : 1;
+  const height = viewport && viewport.height > 0 ? viewport.height : 600;
+  const width = viewport && viewport.width > 0 ? viewport.width : height * a;
+  const vp: Required<CameraViewport> = {
+    width,
+    height,
+    hudWidth: viewport?.hudWidth ?? 120,
+    hudHeight: viewport?.hudHeight ?? 62,
+  };
+  const pts = fitPoints(vp);
+  // Balance top and bottom slack by moving the target along z (bisection; more tz moves the table up on screen).
+  let lo = -1.5;
+  let hi = 1.5;
+  for (let i = 0; i < 30; i++) {
+    const mid = (lo + hi) / 2;
+    const s = slack(pts, fitDistance(pts, mid, a), mid, a);
+    if (s.top > s.bottom) lo = mid;
+    else hi = mid;
+  }
+  const tz = (lo + hi) / 2;
+  const d = fitDistance(pts, tz, a);
   const t = (CAMERA_TILT_DEG * Math.PI) / 180;
   return {
-    position: [0, round(hi * Math.cos(t)), round(hi * Math.sin(t))],
+    position: [0, round(d * Math.cos(t)), round(tz + d * Math.sin(t))],
     fov: CAMERA_FOV,
-    lookAt: [0, 0, 0],
+    lookAt: [0, 0, round(tz)],
   };
 }

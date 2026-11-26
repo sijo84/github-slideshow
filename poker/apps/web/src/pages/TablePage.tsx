@@ -85,7 +85,9 @@ export function TablePage(): JSX.Element {
   const { id = "" } = useParams();
   const [load, setLoad] = useState<GameLoad>({ kind: "loading" });
 
-  useEffect(() => connectTable(id, tableStore), [id]);
+  const { me } = useMe();
+  const myId = me?.id ?? null;
+  useEffect(() => (myId === null ? undefined : connectTable(id, tableStore, myId)), [id, myId]);
 
   useEffect(() => {
     const ctrl = new AbortController();

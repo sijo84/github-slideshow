@@ -103,6 +103,8 @@ export interface TableData {
   deadline: number | null;
   timeBank: { seat: SeatIndex; ms: number; using: boolean } | null;
   mySeat: SeatIndex | null;
+  /** The signed-in user's id (set by connectTable); `applySeats` derives `mySeat` from it. */
+  myPlayerId: string | null;
   myHole: Card[];
   myEquity: Equity | null;
   allInEquity: Record<number, Equity> | null;
@@ -160,6 +162,7 @@ export function initialTableState(): TableData {
     deadline: null,
     timeBank: null,
     mySeat: null,
+    myPlayerId: null,
     myHole: [],
     myEquity: null,
     allInEquity: null,

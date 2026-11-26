@@ -739,6 +739,7 @@ export function dataFromView(prev: TableData, view: TableView): TableData {
     deadline: view.deadline,
     timeBank: null,
     mySeat: view.mySeat,
+    myPlayerId: prev.myPlayerId,
     myHole: [...view.myHole],
     myEquity: null,
     allInEquity: null,

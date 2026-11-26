@@ -910,6 +910,58 @@ describe('applySeats', () => {
   });
 });
 
+describe('my seat from my player id', () => {
+  it('seats arriving with my player id set mySeat; leaving clears it, myHole, legal and myEquity', () => {
+    const store = createTableStore();
+    store.setState({ myPlayerId: PID[2]! });
+    store.getState().applyView({ ...waitingView(), seats: [seatView(0, 1000), seatView(1, 1000)], mySeat: null });
+    expect(store.getState().myPlayerId).toBe(PID[2]);
+    expect(store.getState().mySeat).toBeNull();
+    store.getState().applySeats([seatView(0, 1000), seatView(1, 1000), seatView(2, 1000)]);
+    expect(store.getState().mySeat).toBe(2);
+    // my cards are mine once dealt
+    store.setState({ animate: false });
+    feed(store, hand1().sent.slice(0, 8));
+    expect(store.getState().myHole).toEqual(parseCards('As 4c'));
+    store.getState().setMyEquity({ win: 0.3, tie: 0 });
+    store.setState({ legal: { seat: 2, canFold: true, canCheck: false, callAmount: 10, canBet: false, canRaise: true, minTo: 20, maxTo: 1000 } });
+    store.getState().applySeats([seatView(0, 1000), seatView(1, 1000)]);
+    const s = store.getState();
+    expect(s).toMatchObject({ mySeat: null, myHole: [], legal: null, myEquity: null });
+  });
+
+  it('without a player id, applySeats leaves mySeat alone; applyView keeps the id; reset clears it', () => {
+    const store = freshStore();
+    store.getState().applySeats([seatView(0, 1000)]);
+    expect(store.getState().mySeat).toBe(ME);
+    store.setState({ myPlayerId: PID[0]! });
+    store.getState().applyView(waitingView());
+    expect(store.getState().myPlayerId).toBe(PID[0]);
+    expect(store.getState().mySeat).toBe(ME); // the view's mySeat wins in applyView
+    store.getState().reset();
+    expect(store.getState().myPlayerId).toBeNull();
+  });
+
+  it('connectTable stores my player id before the join', () => {
+    sock.joinResult = { view: { ...waitingView(), mySeat: null } };
+    const store = createTableStore();
+    const disconnect = connectTable(GAME, store, PID[1]!);
+    expect(store.getState().myPlayerId).toBe(PID[1]);
+    sock.fire('table:seats', { gameId: GAME, seats: [seatView(0, 1000), seatView(1, 900)] });
+    expect(store.getState().mySeat).toBe(1);
+    disconnect();
+    expect(store.getState().myPlayerId).toBeNull();
+  });
+
+  it('setError(null) clears lastError', () => {
+    const store = freshStore();
+    store.getState().setError('boom');
+    expect(store.getState().lastError).toBe('boom');
+    store.getState().setError(null);
+    expect(store.getState().lastError).toBeNull();
+  });
+});
+
 describe('other actions', () => {
   it('status, commitment, results, chat cap, errors, equity, reset', () => {
     const store = freshStore();

@@ -252,7 +252,7 @@ describe("TablePage", () => {
   it("connects on mount, mounts the director, and disconnects on unmount", async () => {
     const { unmount } = await renderLoaded();
     expect(mocks.connectTable).toHaveBeenCalledTimes(1);
-    expect(mocks.connectTable).toHaveBeenCalledWith(GAME_ID, store());
+    expect(mocks.connectTable).toHaveBeenCalledWith(GAME_ID, store(), HOST_ID);
     expect(mocks.useDirector).toHaveBeenCalled();
     expect(screen.getByText("Play money")).toBeInTheDocument();
     expect(screen.getByTestId("action-bar-mock")).toHaveAttribute(

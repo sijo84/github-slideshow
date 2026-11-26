@@ -14,7 +14,7 @@ import { useContext, useLayoutEffect, useMemo, useEffect, useState, type ReactNo
 import { PerspectiveCamera } from 'three';
 import { activeTweenCount, onTweenActivity } from '../anim/tween.js';
 import { Felt } from './Felt.js';
-import { cameraFor, makeScene } from './layout.js';
+import { cameraFor, hudSizeFor, makeScene } from './layout.js';
 import { SceneContext, SeatActionsContext, useSeatActions, type Scene, type SeatActions } from './sceneContext.js';
 import { TableStoreContext, useTable } from './storeContext.js';
 import type { StoreApi } from 'zustand';
@@ -64,7 +64,8 @@ function CameraRig() {
   const invalidate = useThree((s) => s.invalidate);
   useLayoutEffect(() => {
     if (width <= 0 || height <= 0) return;
-    const c = cameraFor(width / height);
+    const hud = hudSizeFor(typeof window === 'undefined' ? width : window.innerWidth);
+    const c = cameraFor(width / height, { width, height, ...hud });
     camera.position.set(...c.position);
     camera.lookAt(...c.lookAt);
     if (camera instanceof PerspectiveCamera) {
@@ -99,11 +100,11 @@ function TweenFrameloop() {
 function Lights() {
   return (
     <>
-      <hemisphereLight args={['#dfe9e3', '#0c0f0d', 0.55]} />
-      <ambientLight intensity={0.25} />
+      <hemisphereLight args={['#eef5f0', '#1a1f1c', 1.1]} />
+      <ambientLight intensity={0.35} />
       <directionalLight
         position={[2.5, 9, 4]}
-        intensity={1.6}
+        intensity={2.4}
         castShadow
         shadow-mapSize-width={1024}
         shadow-mapSize-height={1024}
@@ -114,10 +115,9 @@ function Lights() {
         shadow-camera-near={1}
         shadow-camera-far={20}
         shadow-bias={-0.0005}
-        shadow-radius={4}
       />
       {/* A soft warm pool of light over the centre of the felt. */}
-      <spotLight position={[0, 7, 0]} angle={0.7} penumbra={1} intensity={30} decay={2} color="#fff3dc" />
+      <spotLight position={[0, 7, 0]} angle={0.7} penumbra={1} intensity={40} decay={2} color="#fff3dc" />
     </>
   );
 }
@@ -138,7 +138,7 @@ export function Table3D({ children, overlay }: { children?: ReactNode; overlay?:
           <Canvas
             className="table3d-canvas"
             frameloop="demand"
-            shadows
+            shadows="percentage"
             dpr={[1, 2]}
             gl={{ antialias: true, alpha: true }}
             camera={{ fov: initial.fov, position: initial.position, near: 0.1, far: 200 }}

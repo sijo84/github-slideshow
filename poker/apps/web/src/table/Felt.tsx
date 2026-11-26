@@ -1,17 +1,20 @@
 /**
  * The table itself (W5): an oval felt inside a raised, rounded rail, on a dark base, with a soft contact
  * shadow below it and a gentle vignette baked into the felt texture. Rendered inside the Canvas by Table3D.
- * Colours follow theme.css: felt #1f6b47 / --felt-deep #134a31, charcoal rail and base.
+ * Colours: a felt green a little richer than theme.css --felt (#1f6b47) so it reads on the dark page, a dark
+ * leather rail with a satin highlight, a charcoal base. The base sits below y = 0 so it never covers the felt.
  */
 import { ContactShadows } from '@react-three/drei';
 import { useEffect, useMemo } from 'react';
 import { CanvasTexture, ExtrudeGeometry, Path, SRGBColorSpace, Shape, ShapeGeometry, type Texture } from 'three';
 import { FELT_RX, FELT_RZ, RIM_RX, RIM_RZ } from './layout.js';
 
-const FELT_CENTRE = '#237a51';
-const FELT_EDGE = '#123f2a';
-const RAIL_COLOUR = '#1b1f1d';
-const BASE_COLOUR = '#101311';
+const FELT_CENTRE = '#2b8a5b';
+const FELT_MID = '#25804f';
+const FELT_EDGE = '#1a5f3b';
+const RAIL_COLOUR = '#3a2518';
+const TRIM_COLOUR = '#8a6238';
+const BASE_COLOUR = '#151816';
 
 const RAIL_HEIGHT = 0.16;
 const BASE_DEPTH = 0.45;
@@ -39,7 +42,7 @@ function makeFeltTexture(): Texture | null {
   if (!ctx) return null;
   const g = ctx.createRadialGradient(size / 2, size / 2, size * 0.05, size / 2, size / 2, size * 0.5);
   g.addColorStop(0, FELT_CENTRE);
-  g.addColorStop(0.65, '#1c6643');
+  g.addColorStop(0.7, FELT_MID);
   g.addColorStop(1, FELT_EDGE);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
@@ -81,6 +84,12 @@ export function Felt() {
     });
   }, []);
 
+  const trimGeometry = useMemo(() => {
+    const ring = ellipseShape(FELT_RX + 0.02, FELT_RZ + 0.02);
+    ring.holes.push(ellipsePath(FELT_RX - 0.16, FELT_RZ - 0.16));
+    return new ExtrudeGeometry(ring, { depth: 0.03, bevelEnabled: false, curveSegments: 96 });
+  }, []);
+
   const baseGeometry = useMemo(
     () =>
       new ExtrudeGeometry(ellipseShape(RIM_RX - 0.15, RIM_RZ - 0.15), {
@@ -100,10 +109,11 @@ export function Felt() {
     () => () => {
       feltGeometry.dispose();
       railGeometry.dispose();
+      trimGeometry.dispose();
       baseGeometry.dispose();
       feltTexture?.dispose();
     },
-    [feltGeometry, railGeometry, baseGeometry, feltTexture],
+    [feltGeometry, railGeometry, trimGeometry, baseGeometry, feltTexture],
   );
 
   return (
@@ -111,19 +121,24 @@ export function Felt() {
       {/* Shapes are drawn in XY; rotating −90° about x lays them in XZ (shape y → −z, extrusion → +y). */}
       <mesh geometry={feltGeometry} rotation-x={-Math.PI / 2} receiveShadow>
         <meshStandardMaterial
-          color={feltTexture ? '#ffffff' : '#1f6b47'}
+          color={feltTexture ? '#ffffff' : FELT_MID}
           map={feltTexture}
-          roughness={0.95}
+          roughness={0.92}
           metalness={0}
         />
       </mesh>
       <mesh geometry={railGeometry} rotation-x={-Math.PI / 2} castShadow receiveShadow>
-        <meshStandardMaterial color={RAIL_COLOUR} roughness={0.55} metalness={0.05} />
+        <meshStandardMaterial color={RAIL_COLOUR} roughness={0.38} metalness={0.05} />
       </mesh>
-      <mesh geometry={baseGeometry} rotation-x={Math.PI / 2} position-y={-0.02} castShadow>
+      {/* A thin wooden trim where the rail meets the felt. */}
+      <mesh geometry={trimGeometry} rotation-x={-Math.PI / 2} receiveShadow>
+        <meshStandardMaterial color={TRIM_COLOUR} roughness={0.45} metalness={0.1} />
+      </mesh>
+      {/* The base's top bevel reaches 0.05 above its origin: keep it all under the felt. */}
+      <mesh geometry={baseGeometry} rotation-x={Math.PI / 2} position-y={-0.12} castShadow>
         <meshStandardMaterial color={BASE_COLOUR} roughness={0.8} />
       </mesh>
-      <ContactShadows position={[0, -0.55, 0]} scale={[12, 8]} far={2} blur={2.6} opacity={0.6} frames={1} resolution={512} />
+      <ContactShadows position={[0, -0.7, 0]} scale={[12, 8]} far={2} blur={2.6} opacity={0.6} frames={1} resolution={512} />
     </group>
   );
 }
