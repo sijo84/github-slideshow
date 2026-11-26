@@ -58,6 +58,11 @@ export function suitColour(card: Card, fourColour = false): string {
   return (fourColour ? FOUR_COLOUR : TWO_COLOUR)[suitOf(card)]!;
 }
 
+/** Suit symbol of a card (♣ ♦ ♥ ♠). */
+export function suitSymbol(card: Card): string {
+  return SUIT_SYMBOLS[suitOf(card)]!;
+}
+
 /** Corner label of a card's rank ('10' for a ten). */
 export function rankLabel(card: Card): string {
   return RANK_LABELS[rankOf(card)]!;
@@ -91,23 +96,14 @@ export function cardFaceTexture(card: Card, fourColour = false): HTMLCanvasEleme
   ctx.textBaseline = 'middle';
   const font = (px: number) => `bold ${px}px "Helvetica Neue", Arial, sans-serif`;
 
-  // Large corner index (top left, and rotated bottom right) so the card reads at a distance.
-  const corner = (): void => {
-    ctx.font = font(rank.length > 1 ? 66 : 78);
-    ctx.fillText(rank, 50, 54);
-    ctx.font = font(56);
-    ctx.fillText(suit, 50, 118);
-  };
-  corner();
-  ctx.save();
-  ctx.translate(W, H);
-  ctx.rotate(Math.PI);
-  corner();
-  ctx.restore();
-
-  // Big centre pip.
-  ctx.font = font(150);
-  ctx.fillText(suit, W / 2, H / 2 + 10);
+  // Large corner index (top left) so the card reads at a distance, even when a neighbour overlaps its right
+  // side, and a big pip in the lower right.
+  ctx.font = font(rank.length > 1 ? 96 : 116);
+  ctx.fillText(rank, 64, 70);
+  ctx.font = font(84);
+  ctx.fillText(suit, 64, 160);
+  ctx.font = font(170);
+  ctx.fillText(suit, W - 82, H - 92);
   return canvas;
 }
 

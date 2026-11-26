@@ -138,8 +138,8 @@ function clamp(v: number, lo: number, hi: number): number {
  * Where a hole card sits on screen, for the viewer's own seat (`mine`) or an opponent's, at a window width.
  * - Viewer, desktop: a fanned pair left of the HUD (the button sits on its right), vertically centred on it.
  * - Viewer, phone: a fanned pair below-left of the compact HUD, where the canvas has free room.
- * - Opponent: a small fanned pair over the top edge of the HUD (above the avatar), mostly above it; face up at
- *   showdown it grows so rank and suit can be read.
+ * - Opponent: a small fanned pair over the HUD's avatar (desktop: centred near the top; phone: the compact HUD's
+ *   avatar on the left, half above its top edge); face up at showdown it grows so rank and suit can be read.
  */
 export function holeCardLayout(mine: boolean, windowWidth: number, index: 0 | 1): HoleCardLayout {
   const phone = windowWidth <= PHONE_MAX_WIDTH;
@@ -148,7 +148,7 @@ export function holeCardLayout(mine: boolean, windowWidth: number, index: 0 | 1)
     if (phone) {
       const width = 32;
       const fan = 20;
-      return { dx: -74 + (side * fan) / 2, dy: 40, width, height: 45, rotateDeg: side * 4, faceUpScale: 1 };
+      return { dx: -84 + (side * fan) / 2, dy: 42, width, height: 45, rotateDeg: side * 4, faceUpScale: 1 };
     }
     const hudW = clamp(windowWidth * 0.18, 66, 120);
     const width = Math.round(clamp(windowWidth * 0.046, 40, 60));
@@ -166,8 +166,9 @@ export function holeCardLayout(mine: boolean, windowWidth: number, index: 0 | 1)
   const width = Math.round(clamp(windowWidth * 0.026, 24, 32));
   const height = Math.round(width * 1.4);
   const fan = Math.round(width * 0.45);
-  // The desktop HUD is ~100 px tall: the pair overlaps its top edge by ~30% of a card.
-  return { dx: (side * fan) / 2, dy: -50 - height * 0.2, width, height, rotateDeg: side * 6, faceUpScale: 1.4 };
+  // The desktop HUD is ~100-120 px tall with the avatar at its top: the pair sits over the avatar, its top just
+  // inside the HUD's top edge, so it stays in view for seats at the top of the canvas too.
+  return { dx: (side * fan) / 2, dy: -26, width, height, rotateDeg: side * 6, faceUpScale: 1.3 };
 }
 
 /** How much of a hole card's screen offset applies: 1 at a seat, 0 elsewhere (deck, muck), interpolated over

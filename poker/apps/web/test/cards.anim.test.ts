@@ -6,7 +6,11 @@ import {
   arcLift,
   CARD_ARC_HEIGHT,
   cardMotion,
+  holeCardLayout,
+  holeIndexOf,
+  holeSeatOf,
   liftedPosition,
+  offsetWeight,
   placeYaw,
   settleYaw,
   showsFace,
@@ -135,9 +139,12 @@ describe('Cards.tsx source guard', () => {
 
   it('sets a position only from the tweened value', () => {
     const props = src.match(/position=\{[^}]*\}/g) ?? [];
-    expect(props).toEqual(['position={shown}']);
+    expect(props.length).toBeGreaterThanOrEqual(2); // the 3D board card and the DOM hole card's anchor group
+    for (const p of props) expect(p).toBe('position={shown}');
+    expect(src.match(/useTweenedPosition\(/g)).toHaveLength(1);
     expect(src).toMatch(/const pos = useTweenedPosition\(entity\.id, motion\.target,/);
-    expect(src).toMatch(/const shown = liftedPosition\(pos, /);
+    for (const decl of src.match(/const shown = [^;]*;/g) ?? []) expect(decl).toMatch(/^const shown = liftedPosition\(\s*pose\.pos,/);
+    expect(src.match(/const shown = /g)).toHaveLength(2);
     expect(src).not.toMatch(/\.position\s*\.(set|copy|lerp|add)\s*\(/);
     expect(src).not.toMatch(/\.position(\.[xyz])?\s*=[^=]/);
     expect(src).not.toMatch(/useFrame/);
@@ -146,6 +153,46 @@ describe('Cards.tsx source guard', () => {
   it('uses named ease functions, never inline arrows', () => {
     expect(src).not.toMatch(/ease:\s*\(/);
     expect(src).not.toMatch(/ease=\{\s*\(/);
+  });
+});
+
+describe('hole cards on screen', () => {
+  it('reads the seat and index from a hole-card id; board ids have no seat', () => {
+    expect(holeSeatOf('card:h1:3:0')).toBe(3);
+    expect(holeSeatOf('card:a:b:7:1')).toBe(7);
+    expect(holeSeatOf('card:h1:board:2')).toBeNull();
+    expect(holeIndexOf('card:h1:3:1')).toBe(1);
+    expect(holeIndexOf('card:h1:3:0')).toBe(0);
+  });
+
+  it('puts the viewer’s pair large and left of the HUD on desktop, below-left on a phone', () => {
+    for (const index of [0, 1] as const) {
+      const d = holeCardLayout(true, 1280, index);
+      expect(d.width).toBeGreaterThanOrEqual(56);
+      expect(d.height).toBeCloseTo(d.width * 1.4, 0);
+      expect(d.dx + d.width / 2).toBeLessThanOrEqual(-60); // right edge left of the 120 px HUD
+      const p = holeCardLayout(true, 390, index);
+      expect(p.width).toBeGreaterThanOrEqual(30);
+      expect(p.dx + p.width / 2).toBeLessThan(-36); // left of the 72 px compact HUD
+      expect(p.dy).toBeGreaterThan(15); // and lower than its centre
+    }
+    expect(holeCardLayout(true, 1280, 0).dx).toBeLessThan(holeCardLayout(true, 1280, 1).dx);
+  });
+
+  it('puts an opponent’s pair over the HUD and grows it face up', () => {
+    const d = holeCardLayout(false, 1280, 0);
+    expect(Math.abs(d.dx)).toBeLessThan(30);
+    expect(d.faceUpScale).toBeGreaterThan(1);
+    const p = holeCardLayout(false, 390, 1);
+    expect(p.width * p.faceUpScale).toBeGreaterThanOrEqual(22);
+  });
+
+  it('blends the screen offset in over the travel', () => {
+    expect(offsetWeight(false, true, 0)).toBe(0);
+    expect(offsetWeight(false, true, 0.5)).toBe(0.5);
+    expect(offsetWeight(false, true, 1)).toBe(1);
+    expect(offsetWeight(true, false, 1)).toBe(0);
+    expect(offsetWeight(true, true, 0.3)).toBe(1);
   });
 });
 

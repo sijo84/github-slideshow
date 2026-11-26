@@ -1,46 +1,76 @@
 /**
- * Cards (W6, PLAN I-11). Renders one mesh per `CardEntity` in the store, declaratively: a card's position
+ * Cards (W6, PLAN I-11). Renders one object per `CardEntity` in the store, declaratively. A card's position
  * comes only from `useTweenedPosition` (trace series `obj:<entity id>`); the arc lift, landing settle and
- * flip clearance are pure functions of the tweened values (see cardMotion.ts). Flip and fade are `useTween`s.
+ * flip clearance are pure functions of the tweened values (see cardMotion.ts). Flip, fade and scale are
+ * `useTween`s.
+ *
+ * - Board cards (and any card that is not a hole card) are thin 3D boxes with canvas textures, tilted toward
+ *   the camera so the faces read at the 35° camera.
+ * - Hole cards are DOM, drawn through `DomAnchor` above the seat HUDs (which are DOM on top of the canvas and
+ *   would otherwise hide them). The anchor still moves with the tweened position (deck → seat → muck); at a
+ *   seat the card sits at a screen-space offset from the HUD centre (`holeCardLayout`): the viewer's pair beside
+ *   their HUD, large and face up; an opponent's pair over their HUD's avatar, growing at showdown.
  */
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useSyncExternalStore, type CSSProperties } from 'react';
 import * as THREE from 'three';
 import type { Card } from '@poker/engine';
-import { easeInOutCubic, useTween, useTweenedPosition, type Vec3 } from '../anim/tween.js';
+import { easeInOutCubic, easeOutCubic, useTween, useTweenedPosition, type Vec3 } from '../anim/tween.js';
 import {
   arcLift,
   CARD_FADE_MS,
   CARD_FLIP_MS,
   cardMotion,
   flipLift,
+  holeCardLayout,
+  holeIndexOf,
+  holeSeatOf,
   liftedPosition,
+  offsetWeight,
   placeYaw,
   settleYaw,
   showsFace,
   travelFraction,
+  type CardMotion,
 } from './cardMotion.js';
-import { cardBackTexture, cardFaceTexture } from './cardTexture.js';
+import { cardBackTexture, cardFaceTexture, rankLabel, suitColour, suitSymbol } from './cardTexture.js';
+import { DomAnchor } from './DomAnchor.js';
 import { useScene, type Scene } from './sceneContext.js';
 import { useTable } from './storeContext.js';
 import type { CardEntity } from './types.js';
 
-/** Card size in world units (poker ratio 2.5 : 3.5), and its thickness. */
-export const CARD_WIDTH = 0.36;
-export const CARD_HEIGHT = 0.504;
-export const CARD_THICKNESS = 0.006;
-/** The viewer's own hole cards are drawn larger. */
-export const MY_CARD_SCALE = 1.2;
+/** Board card size in world units (poker ratio 2.5 : 3.5; the board slots are 0.62 apart), and thickness. */
+export const CARD_WIDTH = 0.54;
+export const CARD_HEIGHT = 0.756;
+export const CARD_THICKNESS = 0.008;
 /** Tilt toward the camera (rotation about x, far edge up) so faces read at the 35° camera. */
-export const CARD_TILT = 0.12;
+export const CARD_TILT = 0.38;
+/** Board cards on a narrow canvas are drawn larger (they overlap a little; each index stays visible). */
+export const NARROW_CANVAS_PX = 600;
+export const NARROW_BOARD_SCALE = 1.55;
+/** DOM z-index of hole cards: above seat HUDs (20), bet labels (15) and the dealer button (10). */
+export const HOLE_CARD_Z = 25;
 
 const textureCache = new Map<string, THREE.CanvasTexture>();
+
+/**
+ * One shared card geometry whose origin is the middle of the card's far (top) edge: the card hangs toward the
+ * camera from its place point. So the board row sits a little below its slots, clear of the pot above it, and a
+ * card drawn larger on a narrow canvas grows downward and sideways, never up into the pot label.
+ */
+let cardGeometry: THREE.BoxGeometry | null = null;
+function sharedCardGeometry(): THREE.BoxGeometry {
+  if (!cardGeometry) {
+    cardGeometry = new THREE.BoxGeometry(CARD_WIDTH, CARD_THICKNESS, CARD_HEIGHT).translate(0, 0, CARD_HEIGHT / 2);
+  }
+  return cardGeometry;
+}
 
 function canvasTexture(key: string, make: () => HTMLCanvasElement): THREE.CanvasTexture {
   let tex = textureCache.get(key);
   if (!tex) {
     tex = new THREE.CanvasTexture(make());
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
+    tex.anisotropy = 8;
     textureCache.set(key, tex);
   }
   return tex;
@@ -54,19 +84,33 @@ function backTexture(): THREE.CanvasTexture {
   return canvasTexture('back', cardBackTexture);
 }
 
-function isMine(entity: CardEntity, scene: Scene): boolean {
-  return entity.place.at === 'seat' && scene.mySeat !== null && entity.place.seat === scene.mySeat;
-}
+// ---------------------------------------------------------------------------------------------------------
+// Shared motion
 
 interface TravelMemo {
   key: string;
   start: Vec3;
   startYaw: number;
   lastYaw: number;
+  fromSeat: boolean;
+  lastWeight: number;
 }
 
-function CardMesh({ entity, fourColour }: { entity: CardEntity; fourColour: boolean }) {
-  const scene = useScene();
+interface CardPose {
+  motion: CardMotion;
+  /** Displayed position: the tweened position plus the arc lift (and the flip clearance for 3D cards). */
+  pos: Vec3;
+  /** Travel fraction of the current move, 0..1. */
+  f: number;
+  yaw: number;
+  flip: number;
+  opacity: number;
+  /** Weight of the hole card's screen offset (1 at a seat). */
+  weight: number;
+}
+
+/** Everything that moves a card, all driven by tweens. `flipHalfWidth` > 0 lifts the card while it flips. */
+function useCardPose(entity: CardEntity, scene: Scene): CardPose {
   const motion = cardMotion(entity, scene);
   const pos = useTweenedPosition(entity.id, motion.target, {
     from: motion.from,
@@ -74,7 +118,6 @@ function CardMesh({ entity, fourColour }: { entity: CardEntity; fourColour: bool
     durationMs: motion.durationMs,
     ease: motion.ease,
   });
-
   const flip = useTween(showsFace(entity) ? 1 : 0, {
     id: 'flip:' + entity.id,
     durationMs: CARD_FLIP_MS,
@@ -85,40 +128,66 @@ function CardMesh({ entity, fourColour }: { entity: CardEntity; fourColour: bool
     durationMs: CARD_FADE_MS,
     ease: easeInOutCubic,
   });
-  const scale = useTween(isMine(entity, scene) ? MY_CARD_SCALE : 1, {
-    id: 'scale:' + entity.id,
-    durationMs: motion.durationMs,
-    ease: motion.ease,
-  });
 
-  // Remember where the current move started (the displayed position when the target changed), so the arc
-  // and the settle follow the tweened position. Read-only with respect to position: nothing here writes it.
+  // Remember where the current move started (the displayed position when the target changed), so the arc,
+  // the settle and the screen offset follow the tweened position. Nothing here writes a position.
+  const toSeat = entity.place.at === 'seat';
   const toYaw = placeYaw(entity.place, entity.id);
   const key = `${motion.target[0]},${motion.target[1]},${motion.target[2]}`;
   const memo = useRef<TravelMemo | null>(null);
   if (memo.current === null) {
     const startYaw = entity.spawnFrom ? placeYaw(entity.spawnFrom, entity.id) : toYaw;
-    memo.current = { key, start: pos, startYaw, lastYaw: startYaw };
+    const fromSeat = entity.spawnFrom ? entity.spawnFrom.at === 'seat' : toSeat;
+    memo.current = { key, start: pos, startYaw, lastYaw: startYaw, fromSeat, lastWeight: fromSeat ? 1 : 0 };
   } else if (memo.current.key !== key) {
-    memo.current = { key, start: pos, startYaw: memo.current.lastYaw, lastYaw: memo.current.lastYaw };
+    const m = memo.current;
+    memo.current = { key, start: pos, startYaw: m.lastYaw, lastYaw: m.lastYaw, fromSeat: m.lastWeight > 0.5, lastWeight: m.lastWeight };
   }
-  const f = travelFraction(memo.current.start, motion.target, pos);
-  const yaw = settleYaw(memo.current.startYaw, toYaw, f);
-  memo.current.lastYaw = yaw;
+  const m = memo.current;
+  const f = travelFraction(m.start, motion.target, pos);
+  const yaw = settleYaw(m.startYaw, toYaw, f);
+  const weight = offsetWeight(m.fromSeat, toSeat, f);
+  m.lastYaw = yaw;
+  m.lastWeight = weight;
+  return { motion, pos, f, yaw, flip, opacity, weight };
+}
 
-  const shown = liftedPosition(pos, arcLift(f) + flipLift(flip, (CARD_WIDTH * scale) / 2));
+// ---------------------------------------------------------------------------------------------------------
+// 3D cards (board)
+
+function useNarrowCanvas(): boolean {
+  return useSyncExternalStore(subscribeResize, narrowCanvasSnapshot, () => false);
+}
+
+function MeshCard({ entity, fourColour }: { entity: CardEntity; fourColour: boolean }) {
+  const scene = useScene();
+  const pose = useCardPose(entity, scene);
+  const narrow = useNarrowCanvas();
+  const scale = useTween(narrow ? NARROW_BOARD_SCALE : 1, {
+    id: 'scale:' + entity.id,
+    durationMs: pose.motion.durationMs,
+    ease: easeOutCubic,
+  });
+  // Overlapping neighbours (narrow canvas) stack left to right by a hair, so the right card covers cleanly.
+  const stack = entity.place.at === 'board' ? entity.place.index * 0.004 : 0;
+  // The tilt (about the far edge) dips the near edge: lift by that much so the whole card stays above the felt.
+  const tiltClear = CARD_HEIGHT * Math.sin(CARD_TILT) * scale;
+  const shown = liftedPosition(
+    pose.pos,
+    arcLift(pose.f) + flipLift(pose.flip, (CARD_WIDTH * scale) / 2) + tiltClear + stack,
+  );
 
   const face = useMemo(
     () => (entity.card === null ? backTexture() : faceTexture(entity.card, fourColour)),
     [entity.card, fourColour],
   );
   const back = backTexture();
+  const { opacity } = pose;
   const transparent = opacity < 1;
 
   return (
-    <group position={shown} rotation={[CARD_TILT, yaw, 0]} name={entity.id}>
-      <mesh rotation={[0, 0, (1 - flip) * Math.PI]} scale={scale} castShadow>
-        <boxGeometry args={[CARD_WIDTH, CARD_THICKNESS, CARD_HEIGHT]} />
+    <group position={shown} rotation={[CARD_TILT, pose.yaw, 0]} name={entity.id}>
+      <mesh geometry={sharedCardGeometry()} rotation={[0, 0, (1 - pose.flip) * Math.PI]} scale={scale} castShadow>
         {/* BoxGeometry material order: +x, -x, +y (face), -y (back), +z, -z. */}
         <meshStandardMaterial attach="material-0" color="#f4f2ec" transparent={transparent} opacity={opacity} />
         <meshStandardMaterial attach="material-1" color="#f4f2ec" transparent={transparent} opacity={opacity} />
@@ -145,14 +214,154 @@ function CardMesh({ entity, fourColour }: { entity: CardEntity; fourColour: bool
   );
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// DOM hole cards
+
+function subscribeResize(cb: () => void): () => void {
+  window.addEventListener('resize', cb);
+  return () => window.removeEventListener('resize', cb);
+}
+
+function windowWidthSnapshot(): number {
+  return window.innerWidth;
+}
+
+function narrowCanvasSnapshot(): boolean {
+  // The table stage is about 70% of the window on desktop and the full width on phones.
+  return window.innerWidth <= NARROW_CANVAS_PX;
+}
+
+const BACK_STYLE: CSSProperties = {
+  background:
+    'repeating-linear-gradient(45deg, rgba(39,132,90,0.55) 0 2px, transparent 2px 7px),' +
+    'repeating-linear-gradient(-45deg, rgba(39,132,90,0.55) 0 2px, transparent 2px 7px), #134a31',
+  boxShadow: 'inset 0 0 0 2px #fbfaf6, inset 0 0 0 3px #d9b45a',
+};
+
+function HoleCardFace({ card, fourColour, width }: { card: Card; fourColour: boolean; width: number }) {
+  const colour = suitColour(card, fourColour);
+  const rank = rankLabel(card);
+  const rankPx = Math.round(width * (rank.length > 1 ? 0.42 : 0.5));
+  const suitPx = Math.round(width * 0.42);
+  const pipPx = Math.round(width * 0.62);
+  return (
+    <>
+      <span
+        style={{
+          position: 'absolute',
+          left: Math.max(1, Math.round(width * 0.07)),
+          top: Math.max(0, Math.round(width * 0.03)),
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          lineHeight: 1,
+          color: colour,
+          fontWeight: 800,
+          letterSpacing: rank.length > 1 ? '-0.06em' : 0,
+        }}
+      >
+        <span style={{ fontSize: rankPx }}>{rank}</span>
+        <span style={{ fontSize: suitPx, marginTop: 1 }}>{suitSymbol(card)}</span>
+      </span>
+      <span
+        style={{
+          position: 'absolute',
+          right: Math.round(width * 0.06),
+          bottom: Math.round(width * 0.02),
+          fontSize: pipPx,
+          lineHeight: 1,
+          color: colour,
+        }}
+      >
+        {suitSymbol(card)}
+      </span>
+    </>
+  );
+}
+
+function HoleCard({ entity, seat, fourColour }: { entity: CardEntity; seat: number; fourColour: boolean }) {
+  const scene = useScene();
+  const pose = useCardPose(entity, scene);
+  const windowWidth = useSyncExternalStore(subscribeResize, windowWidthSnapshot, () => 1280);
+  const mine = scene.mySeat !== null && seat === scene.mySeat;
+  const layout = holeCardLayout(mine, windowWidth, holeIndexOf(entity.id));
+  const grow = useTween(showsFace(entity) ? layout.faceUpScale : 1, {
+    id: 'scale:' + entity.id,
+    durationMs: CARD_FLIP_MS,
+    ease: easeInOutCubic,
+  });
+  const shown = liftedPosition(pose.pos, arcLift(pose.f));
+
+  const w = pose.weight;
+  const dx = layout.dx * w;
+  const dy = layout.dy * w;
+  const rotate = (pose.yaw * 180) / Math.PI + layout.rotateDeg * w;
+
+  const faceStyle: CSSProperties = {
+    position: 'absolute',
+    inset: 0,
+    borderRadius: Math.max(2, Math.round(layout.width * 0.1)),
+    backfaceVisibility: 'hidden',
+    WebkitBackfaceVisibility: 'hidden',
+    overflow: 'hidden',
+  };
+
+  return (
+    <group position={shown} name={entity.id}>
+      <DomAnchor zIndex={mine ? HOLE_CARD_Z + 1 : HOLE_CARD_Z} pointerEvents="none">
+        <div
+          className="hole-card"
+          data-card-entity={entity.id}
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            left: dx,
+            top: dy,
+            width: layout.width,
+            height: layout.height,
+            opacity: pose.opacity,
+            transform: `translate(-50%, -50%) rotate(${rotate}deg) scale(${grow})`,
+            perspective: layout.width * 6,
+            filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.45))',
+            fontFamily: '"Helvetica Neue", Arial, sans-serif',
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              transformStyle: 'preserve-3d',
+              transform: `rotateY(${(1 - pose.flip) * 180}deg)`,
+            }}
+          >
+            <div style={{ ...faceStyle, background: '#fbfaf6', boxShadow: 'inset 0 0 0 1px #c9cdc9' }}>
+              {entity.card !== null && (
+                <HoleCardFace card={entity.card} fourColour={fourColour} width={layout.width} />
+              )}
+            </div>
+            <div style={{ ...faceStyle, ...BACK_STYLE, transform: 'rotateY(180deg)' }} />
+          </div>
+        </div>
+      </DomAnchor>
+    </group>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------
+
 /** Every card on the table. Lives inside the r3f Canvas (Table3D). */
 export function Cards({ fourColour = false }: { fourColour?: boolean } = {}) {
   const cards = useTable((s) => s.cards);
   return (
     <>
-      {cards.map((entity) => (
-        <CardMesh key={entity.id} entity={entity} fourColour={fourColour} />
-      ))}
+      {cards.map((entity) => {
+        const seat = holeSeatOf(entity.id);
+        return seat === null ? (
+          <MeshCard key={entity.id} entity={entity} fourColour={fourColour} />
+        ) : (
+          <HoleCard key={entity.id} entity={entity} seat={seat} fourColour={fourColour} />
+        );
+      })}
     </>
   );
 }
