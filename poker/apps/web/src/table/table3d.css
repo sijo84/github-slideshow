@@ -1,0 +1,60 @@
+/* Table3D (W5): canvas fills the root; the overlay sits above it and lets pointer events through except on
+   its own controls. */
+
+.table3d {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 420px;
+  overflow: hidden;
+  isolation: isolate;
+  /* Room vignette behind the table: lighter in the middle, charcoal at the edges. */
+  background: radial-gradient(ellipse at 50% 45%, #1d2421 0%, var(--bg, #121513) 60%, #0b0d0c 100%);
+}
+
+@media (max-width: 600px) {
+  .table3d {
+    min-height: 560px;
+  }
+}
+
+/* r3f's Canvas wrapper. Its own stacking context keeps drei <Html> HUD z-indices below the overlay. */
+.table3d-canvas {
+  position: absolute !important;
+  inset: 0;
+  z-index: 0;
+  isolation: isolate;
+}
+
+.table3d-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Controls (and panels that scroll or hold controls) take pointer events again. Add `data-interactive` or the
+   class `table3d-interactive` to any other overlay element that needs them. */
+.table3d-overlay
+  :is(
+    button,
+    a[href],
+    input,
+    select,
+    textarea,
+    label,
+    summary,
+    form,
+    aside,
+    dialog,
+    [role='dialog'],
+    [role='log'],
+    [role='menu'],
+    [role='listbox'],
+    [role='toolbar'],
+    [tabindex],
+    [data-interactive],
+    .table3d-interactive
+  ) {
+  pointer-events: auto;
+}
