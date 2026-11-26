@@ -1280,3 +1280,5 @@ Review run 2026-11-24 by a fresh sub-agent (checked versions with `npm view` and
 - Setup by hand again (Postgres start, role, databases, `npm ci`): the session opened on a branch without `poker/`.
 - WebGL works in this container's headless Chromium (SwiftShader, WebGL 2, about 60 frames a second on an empty page).
 - Before the build the lead wrote section I-11 into this plan.
+- W0 passed (lead ran lint, typecheck and the web tests: 12 files, 129 tests; read `types.ts`, `storeContext.tsx`, `sceneContext.ts` and the `tween.ts` diff). Accepted: `TableState = TableData & TableActions`; the hook stubs `useNotes`, `useEquity`, `useDirector` do nothing instead of throwing; `sceneContext.ts` also exports `SeatActions`, `useSeatActions`, `HOLE_CARD_OFFSET_X`, `HOLE_CARD_INSET`, `HOLE_CARD_Y`.
+- Plan change: W11 is split in two so the page does not wait on the store. **W11a** owns `table/useTableStore.ts`, `table/verify.ts`, `test/tableStore.test.ts`, `test/verify.test.ts`. **W11b** owns `pages/TablePage.tsx`, `table/table.css`, `test/tablePage.test.tsx`.
