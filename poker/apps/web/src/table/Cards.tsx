@@ -12,6 +12,7 @@
  *   their HUD, large and face up; an opponent's pair over their HUD's avatar, growing at showdown.
  */
 import { useMemo, useRef, useSyncExternalStore, type CSSProperties } from 'react';
+import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Card } from '@poker/engine';
 import { easeInOutCubic, easeOutCubic, useTween, useTweenedPosition, type Vec3 } from '../anim/tween.js';
@@ -23,6 +24,10 @@ import {
   flipLift,
   holeCardLayout,
   holeIndexOf,
+  opponentCandidates,
+  pickSpot,
+  tableObstacles,
+  tableProjector,
   holeSeatOf,
   liftedPosition,
   offsetWeight,
@@ -279,28 +284,97 @@ function HoleCardFace({ card, fourColour, width }: { card: Card; fourColour: boo
   );
 }
 
+interface CardRect {
+  dx: number;
+  dy: number;
+  width: number;
+  height: number;
+  rotateDeg: number;
+}
+
+/** A hole card's spot (relative to the seat point) face down and face up. */
+interface HoleLayout {
+  down: CardRect;
+  up: CardRect;
+}
+
+function myCardLayout(windowWidth: number, index: 0 | 1): HoleLayout {
+  const l = holeCardLayout(true, windowWidth, index);
+  const r = { dx: l.dx, dy: l.dy, width: l.width, height: l.height, rotateDeg: l.rotateDeg };
+  return { down: r, up: r };
+}
+
+/**
+ * An opponent's spot: the first free place around the seat box (beside it toward the table centre, above,
+ * below…), found by projecting the table with the same camera Table3D uses (`cameraFor`), so the avatar, name
+ * and stack, the neighbouring boxes, bets, the button, the board and the viewer's cards all stay uncovered.
+ */
+function opponentCardLayout(
+  scene: Scene,
+  seat: number,
+  index: 0 | 1,
+  windowWidth: number,
+  canvasW: number,
+  canvasH: number,
+): HoleLayout {
+  const width = canvasW > 0 ? canvasW : 912;
+  const height = canvasH > 0 ? canvasH : 513;
+  const project = tableProjector(width, height, windowWidth);
+  const seatPos = scene.seatPosition(seat);
+  const at = project(seatPos);
+  const towardRight = seatPos[0] <= 0.01;
+  const side = index === 0 ? -1 : 1;
+  const rect = (faceUp: boolean): CardRect => {
+    const spot = pickSpot(
+      at,
+      opponentCandidates(towardRight, windowWidth, faceUp),
+      tableObstacles(project, scene, windowWidth, faceUp),
+      { width, height },
+    );
+    return {
+      dx: spot.cx + (side * spot.fan) / 2,
+      dy: spot.cy,
+      width: spot.cardW,
+      height: spot.cardH,
+      rotateDeg: side * 3,
+    };
+  };
+  return { down: rect(false), up: rect(true) };
+}
+
 function HoleCard({ entity, seat, fourColour }: { entity: CardEntity; seat: number; fourColour: boolean }) {
   const scene = useScene();
   const pose = useCardPose(entity, scene);
   const windowWidth = useSyncExternalStore(subscribeResize, windowWidthSnapshot, () => 1280);
-  const mine = scene.mySeat !== null && seat === scene.mySeat;
-  const layout = holeCardLayout(mine, windowWidth, holeIndexOf(entity.id));
-  const grow = useTween(showsFace(entity) ? layout.faceUpScale : 1, {
-    id: 'scale:' + entity.id,
-    durationMs: CARD_FLIP_MS,
-    ease: easeInOutCubic,
-  });
+  const canvasW = useThree((st) => st.size.width);
+  const canvasH = useThree((st) => st.size.height);
+  // A card dealt to the viewer stays laid out as the viewer's, even if the viewer leaves the seat (busts) while
+  // it is still on its way to the muck.
+  const wasMine = useRef(false);
+  if (scene.mySeat !== null && seat === scene.mySeat) wasMine.current = true;
+  const mine = wasMine.current;
+  const index = holeIndexOf(entity.id);
+  const layout = useMemo(
+    () => (mine ? myCardLayout(windowWidth, index) : opponentCardLayout(scene, seat, index, windowWidth, canvasW, canvasH)),
+    [mine, scene, seat, index, windowWidth, canvasW, canvasH],
+  );
   const shown = liftedPosition(pose.pos, arcLift(pose.f));
 
+  // Face down → face up blends the spot and size with the flip tween (an opponent's pair moves to a larger
+  // spot at showdown); the screen offset blends in over the travel (`pose.weight`).
+  const k = pose.flip;
+  const pick = (down: number, up: number) => down + (up - down) * k;
+  const width = Math.round(pick(layout.down.width, layout.up.width));
+  const height = Math.round(pick(layout.down.height, layout.up.height));
   const w = pose.weight;
-  const dx = layout.dx * w;
-  const dy = layout.dy * w;
-  const rotate = (pose.yaw * 180) / Math.PI + layout.rotateDeg * w;
+  const dx = pick(layout.down.dx, layout.up.dx) * w;
+  const dy = pick(layout.down.dy, layout.up.dy) * w;
+  const rotate = (pose.yaw * 180) / Math.PI + layout.down.rotateDeg * w;
 
   const faceStyle: CSSProperties = {
     position: 'absolute',
     inset: 0,
-    borderRadius: Math.max(2, Math.round(layout.width * 0.1)),
+    borderRadius: Math.max(2, Math.round(width * 0.1)),
     backfaceVisibility: 'hidden',
     WebkitBackfaceVisibility: 'hidden',
     overflow: 'hidden',
@@ -317,11 +391,11 @@ function HoleCard({ entity, seat, fourColour }: { entity: CardEntity; seat: numb
             position: 'absolute',
             left: dx,
             top: dy,
-            width: layout.width,
-            height: layout.height,
+            width,
+            height,
             opacity: pose.opacity,
-            transform: `translate(-50%, -50%) rotate(${rotate}deg) scale(${grow})`,
-            perspective: layout.width * 6,
+            transform: `translate(-50%, -50%) rotate(${rotate}deg)`,
+            perspective: width * 6,
             filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.45))',
             fontFamily: '"Helvetica Neue", Arial, sans-serif',
           }}
@@ -336,7 +410,7 @@ function HoleCard({ entity, seat, fourColour }: { entity: CardEntity; seat: numb
           >
             <div style={{ ...faceStyle, background: '#fbfaf6', boxShadow: 'inset 0 0 0 1px #c9cdc9' }}>
               {entity.card !== null && (
-                <HoleCardFace card={entity.card} fourColour={fourColour} width={layout.width} />
+                <HoleCardFace card={entity.card} fourColour={fourColour} width={width} />
               )}
             </div>
             <div style={{ ...faceStyle, ...BACK_STYLE, transform: 'rotateY(180deg)' }} />

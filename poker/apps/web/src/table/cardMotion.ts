@@ -5,6 +5,8 @@
  * the only writer of a card's position.
  */
 import { easeInOutCubic, easeOutBack, easeOutCubic, type Ease, type Vec3 } from '../anim/easing.js';
+import { PerspectiveCamera, Vector3 } from 'three';
+import { cameraFor, hudSizeFor } from './layout.js';
 import { cardPlacePosition, type Scene } from './sceneContext.js';
 import { DEAL_STAGGER_MS, type CardEntity, type CardPlace } from './types.js';
 
@@ -322,4 +324,19 @@ export function tableObstacles(
     }
   }
   return out;
+}
+
+/** World → canvas px for the camera Table3D sets up (`cameraFor` with the same view and seat-box sizes). */
+export function tableProjector(width: number, height: number, windowWidth: number): (p: Vec3) => readonly [number, number] {
+  const c = cameraFor(width / height, { width, height, ...hudSizeFor(windowWidth) });
+  const camera = new PerspectiveCamera(c.fov, width / height, 0.1, 200);
+  camera.position.set(c.position[0], c.position[1], c.position[2]);
+  camera.lookAt(c.lookAt[0], c.lookAt[1], c.lookAt[2]);
+  camera.updateMatrixWorld();
+  camera.updateProjectionMatrix();
+  const v = new Vector3();
+  return (p) => {
+    v.set(p[0], p[1], p[2]).project(camera);
+    return [((v.x + 1) / 2) * width, ((1 - v.y) / 2) * height];
+  };
 }

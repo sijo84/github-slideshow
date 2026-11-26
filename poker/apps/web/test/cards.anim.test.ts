@@ -11,6 +11,10 @@ import {
   holeSeatOf,
   liftedPosition,
   offsetWeight,
+  opponentCandidates,
+  pickSpot,
+  seatBoxSize,
+  tableObstacles,
   placeYaw,
   settleYaw,
   showsFace,
@@ -193,6 +197,55 @@ describe('hole cards on screen', () => {
     expect(offsetWeight(false, true, 1)).toBe(1);
     expect(offsetWeight(true, false, 1)).toBe(0);
     expect(offsetWeight(true, true, 0.3)).toBe(1);
+  });
+});
+
+describe('opponent card spots', () => {
+  const inside = (a: { x0: number; y0: number; x1: number; y1: number }, b: typeof a) =>
+    a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+
+  it('never puts a candidate over the seat box itself (avatar, name, stack)', () => {
+    for (const width of [390, 1280])
+      for (const faceUp of [false, true])
+        for (const right of [false, true]) {
+          const box = seatBoxSize(width);
+          const own = { x0: -box.w / 2, y0: -box.h / 2, x1: box.w / 2, y1: box.h / 2 };
+          for (const c of opponentCandidates(right, width, faceUp)) {
+            const r = { x0: c.cx - c.pairW / 2, y0: c.cy - c.pairH / 2, x1: c.cx + c.pairW / 2, y1: c.cy + c.pairH / 2 };
+            expect(inside(r, own)).toBe(false);
+          }
+        }
+  });
+
+  it('prefers the side facing the table centre and skips spots that hit an obstacle', () => {
+    const cands = opponentCandidates(true, 1280, false);
+    expect(cands[0]!.cx).toBeGreaterThan(0);
+    const canvas = { width: 900, height: 500 };
+    expect(pickSpot([300, 250], cands, [], canvas)).toBe(cands[0]);
+    const first = cands[0]!;
+    const blocker = { x0: 300 + first.cx - 5, y0: 250 + first.cy - 5, x1: 300 + first.cx + 5, y1: 250 + first.cy + 5 };
+    const picked = pickSpot([300, 250], cands, [blocker], canvas);
+    expect(picked).not.toBe(first);
+    const r = { x0: 300 + picked.cx - picked.pairW / 2, y0: 250 + picked.cy - picked.pairH / 2, x1: 300 + picked.cx + picked.pairW / 2, y1: 250 + picked.cy + picked.pairH / 2 };
+    expect(inside(r, blocker)).toBe(false);
+  });
+
+  it('face-up pairs are larger than face-down ones', () => {
+    for (const width of [390, 1280]) {
+      const down = opponentCandidates(true, width, false)[0]!;
+      const up = opponentCandidates(true, width, true)[0]!;
+      expect(up.cardW).toBeGreaterThan(down.cardW);
+      expect(up.cardW).toBeGreaterThanOrEqual(22);
+    }
+  });
+
+  it('lists every seat box, bet, button, board slot, the pot and the viewer’s cards as obstacles', () => {
+    const project = (p: Vec3) => [p[0] * 100 + 450, p[2] * 80 + 250] as const;
+    const down = tableObstacles(project, scene, 1280, false);
+    const up = tableObstacles(project, scene, 1280, true);
+    // 6 seats × (box + bet + button) + 5 board + pot + 2 own cards; face up has no bets.
+    expect(down).toHaveLength(6 * 3 + 5 + 1 + 2);
+    expect(up).toHaveLength(6 * 2 + 5 + 1 + 2);
   });
 });
 
